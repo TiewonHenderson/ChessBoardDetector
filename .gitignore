@@ -1,0 +1,17 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Cache
+.cache/
+*.egg-info/
+.eggs/
+
+# Tests
+.pytest_cache/
+coverage/
+
+# Personal config files
+*.swp
+*.swo
