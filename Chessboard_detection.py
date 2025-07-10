@@ -3,31 +3,37 @@ import math
 import cv2
 import numpy as np
 from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import Sobel_Harris_Test as sh
-from ChessBoardDetector import HoughTransformTest as ht
+from ChessBoardDetector import HarrisCornerDetection as hcd
+from ChessBoardDetector import HoughTransform as ht
 
 """
-settings 
-0 params is when the chessboard nearly fills the whole photo
-1 params are default params when chessboard is around 1/5-1/4 the image
-2 params for chessboards 1/4 of image
-
+constant = the value is used as is
+multiplier = a multipled value to an already constant epsilon
+(larger == more lenient)
 setting params are formatted as such:
-0 = ksize (blur intensity, must be odd)
-1 = edge_threshold1 (Min threshold for edge to be a candidate)
-2 = edge_threshold2 (threshold for automatic edge detection)
-3 = houghline_threshold (votes to accept a line)
-4 = harris_eps (scaling multiplier (larger == more lenient) for harris corner to merge as a cluster)
-purpose: remove noise corner points
-5 = eps_scalar (scaling multiplier (larger == more lenient) for clustering and filtering lines by:
+0) ksize             [constant]   (blur intensity, must be odd)
+1) edge_threshold1   [constant]   (Min threshold for edge to be a candidate)
+2) edge_threshold2   [constant]   (threshold for automatic edge detection)
+3) hline_thres       [constant]   (votes to accept a line)
+4) similar_hline_eps [multiplier] (A epsilon treated as a threshold for difference in
+rho, theta to still be accepted as similar hough lines)
+5) eps_scalar        [multiplier] for filtering lines by:
 intersection with corners (how off they can be)
 clustering lines by consistent gaps (how off the gaps can be to be merged))
-6 = similar_houghline_eps (A constant value epsilon as a threshold for difference in
-rho, theta to still be accepted as similar hough lines)
+6) cluster_eps       [multiplier] for clustering lines together by theta
+Either DBSCAN cluster (determines how close the theta values are to be merged)
+Or KMEANs (this eps doesn't affect it)
+7) gap_eps           [multiplier] for scaled epsilon between gaps, if the gap difference
+is below the eps, it gets accepted within a line group
 """
-detection_params = [[11, 150, 200, 150, None, 1, 1.75],
-                    [7, 100, 150, 100, 0.5, 0.75, 1],
-                    [5, 85, 100, 80, 1.0, 0.15, 0.5]]
+ksize = [11, 7, 5]
+edge_thres1 = [150, 100, 85]
+edge_thres2 = [200, 150, 100]
+hline_thres = [150, 100, 80]
+similar_hline_eps = [1.75, 1, 0.5]
+eps_scalar = [1, 0.55, 0.25]
+cluster_eps = [1, 0.5, 0.2]
+gap_eps = [1.1, 0.85, 0.3]
 
 
 def image_load(image_name):
@@ -54,7 +60,7 @@ def image_load(image_name):
     return image
 
 
-def get_edges(image, settings):
+def get_edges(image, ksize, edge_threshold1, edge_threshold2):
     """
     Gets edges by:
     Gaussian Blur
@@ -65,14 +71,12 @@ def get_edges(image, settings):
     :return: A 2D python list of binary edges
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    ksize = settings[0]
     blurred = cv2.GaussianBlur(gray, (ksize, ksize), 1)
-    return cv2.Canny(blurred, settings[1], settings[2])
+    return cv2.Canny(blurred, edge_threshold1, edge_threshold2)
 
 
-def houghLine_detect(edges, corners=None, mask=None, threshold=150, corner_eps=5, line_eps=10):
+def houghLine_detect(edges, corners=None, mask=None, threshold=150, corner_eps=5, line_eps=11):
     """
-
     :param edges: All the edges found from canny edge detection
     :param corners: A result from harris corner detection
     :param mask: A mask over the image to actually look for lines
@@ -86,21 +90,23 @@ def houghLine_detect(edges, corners=None, mask=None, threshold=150, corner_eps=5
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
     lines = ht.unpack_hough(cv2.HoughLines(e, 1, np.pi / 180, threshold=threshold))
+    lines = [fg.normalize_line(l) for l in lines]
     lines = fg.filter_similar_lines(lines, line_eps)
     if corners is not None:
-        lines = sh.filter_hough_lines_by_corners(lines, corners, tolerance=corner_eps)
+        lines = hcd.filter_hough_lines_by_corners(lines, corners, tolerance=corner_eps)
     return lines
 
 
-def cluster_lines(image, lines, gap_eps):
+def cluster_lines(image, lines, cluster_eps, gap_eps, detection_mode):
     """
 
     :param image:
     :param lines:
     :param gap_eps:
+    :param detection_mode:
     :return:
     """
-    clusters = fg.cluster_lines(lines, gap_eps)
+    clusters = fg.dbscan_cluster_lines(lines, cluster_eps)
     for key in clusters:
         """
         Sorts each cluster by rho value, then linearly scans to group each line by consistent gaps
@@ -110,12 +116,24 @@ def cluster_lines(image, lines, gap_eps):
 
         saves the largest found group of parallel lines with consistent gaps
         """
+        # for key in clusters:
+        #     lz = clusters[key]
+        #     print(lz)
+        #     for i in range(len(lz)):
+        #         print(lz[i])
+        #         find_exact_line(image, lz, i)
         sorted_list, gap_average = ht.sort_Rho(clusters[key], gap_eps)
-        clusters[key] = max(ht.gap_Interpolation(sorted_list, gap_average, image.shape[:2]), key=len)
-    return list(clusters.items())
+        # for x in sorted_list:
+        #     lz = x
+        #     print(lz)
+        #     for i in range(len(lz)):
+        #         print(lz[i])
+        #         find_exact_line(image, lz, i)
+        clusters[key] = ht.gap_Interpolation(sorted_list, gap_average, image.shape[:2])
+    return list(clusters.values())
 
 
-def check_all_grids(image, cluster_list, corners):
+def check_all_grids(image, cluster_list, corners, d_mode):
     """
 
     :param image:
@@ -129,24 +147,26 @@ def check_all_grids(image, cluster_list, corners):
     Brute force check each cluster conditions stated in filter_grids.check_grid_like() header
     each cluster is then combined and a score is saved corresponding to their indices
 
-    Currenly, the highest score is considered the chessboard 
+    cluster_list = 4d array
+    Each cluster stores similar theta groups that are stored in list of similar gaps by rho
     """
     for i, theta in enumerate(cluster_list[1:], start=1):
-        _, cluster1 = cluster_list[i - 1]
-        clusters.append(cluster1)
-        j = i
-        while j < len(cluster_list):
-            _, cluster2 = cluster_list[j]
-            score = fg.check_grid_like(cluster1, cluster2, image.shape, corners)
-            clusters[-1].extend(cluster2)
-            scores.append(score)
-            j += 1
+        c1 = cluster_list[i - 1]
+        for g1 in c1:
+            j = i
+            while j < len(cluster_list):
+                c2 = cluster_list[j]
+                for g2 in c2:
+                    score = fg.check_grid_like(g1, g2, d_mode, image.shape, corners)
+                    clusters.append(g1.copy())
+                    clusters[-1].extend(g2.copy())
+                    scores.append(score)
+                    j += 1
     return clusters, scores
 
 
 def present_lines(image, clusters, scores, corners):
     """
-
     :param image:
     :param clusters:
     :param scores:
@@ -163,31 +183,49 @@ def present_lines(image, clusters, scores, corners):
         max_index = scores.index(max(scores))
         for i in range(len(clusters)):
             if i == max_index:
-                ht.put_lines(clusters[i], image, green)
+                ht.put_lines(clusters[i], image, green, 2)
             else:
-                ht.put_lines(clusters[i], image, red)
+                ht.put_lines(clusters[i], image, red, 1)
         ht.show_images(image)
 
 
-def detect_chessboard(image_name, detection_mode):
+def find_exact_line(image, lines, index, corners=[]):
+
+    img = image.copy()
+    l_copy = lines.copy()
+    line_x = [l_copy[index]]
+    l_copy.pop(index)
+    ht.put_lines(l_copy, img, (0, 0, 255))
+    ht.put_lines(line_x, img, (0, 255, 0))
+    blue = (255, 0, 0)
+    for x, y in corners:
+        cv2.circle(img, (x, y), 3, color=blue, thickness=-1)
+    ht.show_images(img)
+
+
+def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
     """
 
     :param image_name:
-    :param detection_mode:
+    :param thres_config:
+    :param scalar_config:
     :return:
     """
+
+    ksize, edge_thres1, edge_thres2, hline_thres = thres_config
+    similar_houghline_eps, eps_scalar, cluster_eps, gap_eps = scalar_config
     image = image_load(image_name)
     height, width, _ = image.shape
 
     # Epsilon list (suggested by GPT and tested)
-    settings = detection_params[detection_mode]
     image_diagonal = np.hypot(width, height)
-    line_similarity_eps = int(image_diagonal * 0.01) * settings[6]
-    corner_eps = int(image_diagonal * 0.05) * settings[5]
-    gap_eps = 0.2 * settings[5]
+    line_similarity_eps = int(image_diagonal * 0.01) * similar_houghline_eps
+    corner_eps = int(image_diagonal * 0.05) * eps_scalar if d_mode < 2 else 1
+    cluster_eps = 0.1 * cluster_eps
+    gap_eps = 0.1 * gap_eps
 
-    edges = get_edges(image, settings)
-    corners = sh.harris(image, settings[0], settings[4])
+    edges = get_edges(image, ksize, edge_thres1, edge_thres2)
+    corners = hcd.harris(image, ksize)
 
     # Filter outer pixels by using a binary mask mask,
     # lines from those areas are generally not part of the chessboard
@@ -204,21 +242,29 @@ def detect_chessboard(image_name, detection_mode):
         255,
         thickness=-1
     )
-    good_lines, lines = houghLine_detect(edges, corners, mask, settings[3], corner_eps, line_similarity_eps)
-    clusters = cluster_lines(image, good_lines, gap_eps)
-    clusters, scores = check_all_grids(image, clusters, corners)
+    good_lines, lines = houghLine_detect(edges,
+                                         corners,
+                                         mask,
+                                         hline_thres,
+                                         corner_eps,
+                                         line_similarity_eps)
+    # lines = sorted(lines, key=lambda l: l[0])
+    # for x in range(len(lines)):
+    #     print(lines[x])
+    #     find_exact_line(image, lines, x, corners)
+    clusters = cluster_lines(image, good_lines, cluster_eps, gap_eps, d_mode)
+    clusters, scores = check_all_grids(image, clusters, corners, d_mode)
 
     if len(scores) > 0 and max(scores) > 40:
         present_lines(image, clusters, scores, corners)
         return True
     else:
-        clusters = cluster_lines(image, lines, gap_eps)
-        clusters, scores = check_all_grids(image, clusters, corners)
+        clusters = cluster_lines(image, lines, cluster_eps, gap_eps, d_mode)
+        clusters, scores = check_all_grids(image, clusters, corners, d_mode)
     if len(scores) > 0 and max(scores) > 20:
         present_lines(image, clusters, scores, corners)
         return True
 
-    print(scores)
     # NO FOUND GRID, TRY DIFFERENT SETTINGS
     return False
 
@@ -246,10 +292,14 @@ def main():
             "Real_Photos/Far,somewhat_angled,flat.jpg",
             "Real_Photos/Mid,somewhat_angled,flat2.jpg",
             "Real_Photos/Mid,very_angled,solid.jpg"]
+
     detected = False
     i = 0
     while not detected:
-        detected = detect_chessboard(hard[0], i)
+        thres_config = (ksize[i], edge_thres1[i], edge_thres2[i], hline_thres[i])
+        scalar_config = (similar_hline_eps[i], eps_scalar[i], cluster_eps[i], gap_eps[i])
+        detected = detect_chessboard(medium[0], thres_config, scalar_config, i)
+        print('done: ', i)
         i += 1
 
 

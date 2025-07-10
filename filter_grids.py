@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 from sklearn.cluster import DBSCAN
+from sklearn.cluster import KMeans
 from sklearn.metrics import pairwise_distances
 from skimage.color import rgb2lab
 from scipy import ndimage
@@ -29,6 +30,7 @@ def intersection_polar_lines(line1, line2, eps=1e-6):
 
     # Check if determinant is close to zero → lines are parallel
     det = np.linalg.det(A)
+
     if abs(det) < eps:
         return None  # No intersection (parallel lines)
 
@@ -40,10 +42,31 @@ def intersection_polar_lines(line1, line2, eps=1e-6):
 def normalize_theta(theta):
     """
     This is for clustering lines by orientation
+    This should not replace the theta value from houghline outputs!
+
     :param theta: Theta corresponding to a detected hough line
     :return: normalized theta would represent the orientation better
     """
-    return theta - np.pi if theta > np.pi/2 else theta
+    return theta % np.pi
+
+
+def normalize_line(line):
+    """
+    One of the issues of polar coordinates is it revolves around the origin
+    This creates the line as a positive rho,
+    but offsets theta a lot due to the nature of polar coordinates
+    :param line: A [rho, theta] value from hough line transform
+    :return:
+    """
+    rho, theta = line
+
+    # If rho is negative, the line itself is on the opposite side of the origin
+    # we would need to rotate the line 180 degree which changes theta
+    if rho < 0:
+        rho = -rho
+        theta = (theta + np.pi) % (np.pi * 2)
+
+    return [rho, theta]
 
 
 def scaled_scoring(cv, max_cv, max_points, power=1):
@@ -60,36 +83,15 @@ def scaled_scoring(cv, max_cv, max_points, power=1):
     return round(score, 5)
 
 
-def cluster_lines(lines, eps=0.2):
+def label_to_cluster(lines, labels):
     """
-        Clusters using DBSCAN, then labels each cluster by it's average theta
 
-        Remember! the detection mode matters with distance,
-        If detection mode is strict, distance should be a lot more
-
-        DBSCAN is not good with a lot of points, if using small threshold settings,
-        Make sure to use small epsilon value
-
-            radians       degree
-            0.5       =   28.6479
-            0.4       =   22.9183
-            0.3       =   17.1887
-            0.2       =   11.4592
-        :param eps: The radian epsilon to cluster lines within
+    :param lines: unpacked lines from houghline transformation
+    :param labels: Labels from a clustering algorithm to assign each line
+    :return: A dict representing key = average theta in cluster, value = line clusters (list of [rho, theta])
     """
-    line_array = lines.copy()
-    line_array = np.array([
-        [normalize_theta(theta)]
-        for rho, theta in line_array
-    ])
-
-    """
-    DBSCAN expects a 2d np array representing points
-    """
-    clustering = DBSCAN(eps=eps, min_samples=2, algorithm='ball_tree').fit(line_array)  # tune eps
-    labels = clustering.labels_
-
     clusters = []
+    # sums is used to assign average theta as keys to each cluster
     sums = []
     # lines is 3d of 2d representing [[rho,theta]]
     for x in range(len(lines)):
@@ -101,7 +103,6 @@ def cluster_lines(lines, eps=0.2):
         while len(clusters) <= label:
             clusters.append([])
             sums.append([0,0])
-
         sums[label][0] += 1
         sums[label][1] += lines[x][1]
         clusters[label].append(lines[x])
@@ -122,25 +123,83 @@ def cluster_lines(lines, eps=0.2):
     return cluster_dict
 
 
+def dbscan_cluster_lines(lines, eps=0.1):
+    """
+        Clusters using DBSCAN, then labels each cluster by it's average theta
+
+        Remember! the detection mode matters with distance,
+        If detection mode is strict, distance should be a lot more
+
+        DBSCAN is not good with a lot of points, if using small threshold settings,
+        Make sure to use small epsilon value
+
+            radians       degree
+            0.4       =   22.9183
+            0.3       =   17.1887
+            0.2       =   11.4592
+            0.1       =   5.72958
+            0.05      =   2.864789
+            0.02      =   1.145916
+        :param eps: The radian epsilon to cluster lines within
+    """
+    if len(lines) == 0:
+        return {}
+    line_array = lines.copy()
+    line_array = np.array([
+        [normalize_theta(theta)]
+        for rho, theta in line_array
+    ])
+    """
+    DBSCAN expects a 2d np array representing points
+    """
+    clustering = DBSCAN(eps=eps, min_samples=2, algorithm='ball_tree').fit(line_array)  # tune eps
+    labels = clustering.labels_
+
+    return label_to_cluster(lines, labels)
+
+
+def kmeans_cluster_lines(lines):
+    """
+    Uses 1D KMeans to cluster theta (normalized)
+    :param lines:
+    :return:
+    """
+    line_array = lines.copy()
+    line_array = np.array([
+        [np.cos(theta), np.sin(theta)]
+        for rho, theta in line_array
+    ])
+    labels = KMeans(n_clusters=2, n_init='auto').fit_predict(line_array)
+    return label_to_cluster(lines, labels)
+
+
 def filter_similar_lines(lines, eps=11):
     """
-    Filters similar lines by similar between rhos and theta is below a threshold
-    A general filtering function, not to be confused with
+    Filters similar lines by checking if rho and theta differences are below thresholds
+    Compares orientation
     """
+    if len(lines) == 0:
+        return lines
+
     filtered = []
-    filter_lines = []
+
     for rho, theta in lines:
         too_close = False
-        for r, t in filtered:
-            # checks if both rho and theta values are close, indicating extremely similar lines
-            if abs(rho - r) < eps and abs(theta - t) < np.deg2rad(int(eps/4)):
+        theta = normalize_theta(theta)
+
+        for filtered_rho, filtered_theta in filtered:
+            # Check if both rho and theta values are close
+            rho_close = abs(rho - filtered_rho) < eps
+            theta_close = abs(theta - filtered_theta) < np.deg2rad(int(eps/4))
+
+            if rho_close and theta_close:
                 too_close = True
                 break
+
         if not too_close:
             filtered.append((rho, theta))
-            filter_lines.append([rho, theta])
 
-    return filter_lines
+    return [[rho, theta] for rho, theta in filtered]
 
 
 def filter_similar_rho(clusters, eps):
@@ -166,13 +225,20 @@ def filter_similar_rho(clusters, eps):
     return line_clusters
 
 
-def check_grid_like(cluster1, cluster2, image_shape=None, corners=[]):
+def check_grid_like(cluster1, cluster2, d_mode, image_shape=None, corners=[]):
     """
     Weight cases:
-    Evenly spaced intersections = 40/100
+    For d_mode == 0, 1
+    Evenly spaced intersections = 30/100
     High ratio of intersections being corners = 30/100
     Evenly spaced rho difference = 20/100
-    Amount of lines = 10/100
+    Amount of lines = 20/100
+
+    For d_mode == 2
+    Amount of lines = 40/100
+    Evenly spaced intersections = 20/100
+    High ratio of intersections being corners = 20/100
+    Evenly spaced rho difference = 20/100
 
     :param cluster1: Cluster of lines represented as an unpacked 2D list
     :param cluster2: Cluster of lines represented as an unpacked 2D list
@@ -259,27 +325,29 @@ def check_grid_like(cluster1, cluster2, image_shape=None, corners=[]):
     # Final confidencce score to classify grid by lines
     score = 0
     max_cv = 0.20
+    intersect_points = 30 if d_mode < 2 else 20
+    line_points = 20 if d_mode < 2 else 40
+
     """
     Variance scoring
-    
     CV              Interpretation
     [0, 0.05]       Perfect CV
     [0.05, 0.1]     Great CV
     [0.1, 0.2]      Acceptable CV
     [0.2, inf)      No points
     """
-    # Score for: Evenly spaced intersections = 40/100
+    # Score for: Evenly spaced intersections = 30/100
     intersect_mean = 1
     if all_intersects_mean[1] > 0 and all_intersects_mean[0] > 0:
         intersect_mean = all_intersects_mean[0] / all_intersects_mean[1]
     intersect_cv = np.std(np.array(all_intersects)) / intersect_mean
-    score += scaled_scoring(intersect_cv, max_cv, 40, 2)
+    score += scaled_scoring(intersect_cv, max_cv, intersect_points, 2)
 
     # High ratio of intersections (with high intersections) being corners = 30/100
     corner_intersect_ratio = 1
     if total_intersect > 0:
         corner_intersect_ratio = abs(1 - (corner_intersect/total_intersect))
-    score += scaled_scoring(corner_intersect_ratio, 1, 25, 1)
+    score += scaled_scoring(corner_intersect_ratio, 1, intersect_points, 1)
 
     # Score for: Evenly spaced rho difference = 20/100
     c1_mean, c2_mean = sum(rho_dist_list1), sum(rho_dist_list2)
@@ -300,11 +368,12 @@ def check_grid_like(cluster1, cluster2, image_shape=None, corners=[]):
 
     score += scaled_scoring(aver_cluster_cv, max_cv, 20, 2)
 
-    # Score for: Amount of lines = 10/100
-    # Preferred amount of lines [8,27], done through parabolic scaling
+    # Score for: Amount of lines = 20/100
+    # amount of lines [8,27] gets half by default, additional through parabolic scaling
     if total_lines > 7 and total_lines < 28:
         norm_amt = (total_lines - 18) / (18 - 8)
-        score += 10 * max(0, 1 - norm_amt ** 2)
+        score += (line_points/2) * max(0, 1 - norm_amt ** 2) + (line_points/2)
+
 
     # print("Grid scores")
     # print("Intersection variance: ", intersect_cv)
@@ -315,4 +384,3 @@ def check_grid_like(cluster1, cluster2, image_shape=None, corners=[]):
     # print("Amount of lines: ", total_lines)
     # print("Final score: ", score, "/ 100")
     return score
-

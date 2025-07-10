@@ -3,19 +3,15 @@ import math
 import cv2
 import numpy as np
 from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import Sobel_Harris_Test as sh
+from ChessBoardDetector import HarrisCornerDetection as hcd
 
-"""
-settings 0 params is when the chessboard nearly fills the whole photo
-1 params are default params when chessboard is around 1/5-1/4 the image
-2 params for chessboards 1/4 of image
 
-setting params are formatted as such:
-ksize, edge_threshold1, edge_threshold2, houghline_threshold, harris_eps, eps_scalar
-"""
-detection_params = [[11, 150, 200, 150, None, 1],
-                    [7, 100, 150, 100, 0.5, 0.75],
-                    [5, 85, 100, 80, 1.0, 0.15]]
+def put_lines(lines, image, color, thickness=2):
+    if len(lines) != 0:
+        for rho, theta in lines:
+            points = get_line(rho,theta)
+            # Display line using openCV (GPT)
+            cv2.line(image, points[0], points[1], color=color, thickness=thickness)
 
 
 def show_images(image):
@@ -39,10 +35,10 @@ def get_line(rho, theta):
     x0 = a * rho
     y0 = b * rho
     # To expand the line, totalling to 3000 pixel length
-    x1 = int(x0 + 1500 * (-b))
-    y1 = int(y0 + 1500 * (a))
-    x2 = int(x0 - 1500 * (-b))
-    y2 = int(y0 - 1500 * (a))
+    x1 = int(x0 + 2000 * (-b))
+    y1 = int(y0 + 2000 * (a))
+    x2 = int(x0 - 2000 * (-b))
+    y2 = int(y0 - 2000 * (a))
     return [(x1, y1), (x2, y2)]
 
 
@@ -75,12 +71,23 @@ def unpack_hough(lines):
         return []
 
 
-def put_lines(lines, image, color):
-    if len(lines) != 0:
-        for rho,theta in lines:
-            points = get_line(rho,theta)
-            # Display line using openCV (GPT)
-            cv2.line(image, points[0], points[1], color=color, thickness=1)
+def orthogonal_gap(line1, line2):
+    """
+    Perpendicular spacing = Δρ/cos(θ)
+    :param line1:
+    :param line2:
+    :return:
+    """
+    r1, t1 = line1
+    r2, t2 = line2
+    delta_rho = abs(r2 - r1)
+    mean_theta = (t1 + t2) / 2
+
+    denom = math.cos(mean_theta)
+    if denom > 0.0001:
+        return delta_rho / denom
+    else:
+        return delta_rho
 
 
 def sort_Rho(lines, eps):
@@ -102,17 +109,25 @@ def sort_Rho(lines, eps):
     if len(lines) <= 4:
         return [lines], []
 
-    prev_gap = abs(lines[0][0] - lines[1][0])
+    prev_gap = abs(orthogonal_gap(lines[0], lines[1]))
     candidates = []
     gap_average = [prev_gap]
     l = 0
-    for i in range(1, len(lines)):
-        # Last line, cannot go further
+    i = 1
+    while i <= len(lines) - 1:
+        gap_mean = gap_average[-1] / (i - l)
         if i == len(lines) - 1:
+            gap_average[-1] = gap_mean
             candidates.append([l, i])
             break
-        gap = abs(lines[i][0] - lines[i + 1][0])
-        gap_mean = gap_average[-1] / abs(i - l)
+        gap = abs(orthogonal_gap(lines[i], lines[i + 1]))
+        # Since these are clustered as similar theta, same rho should be combined into 1 line
+        if gap == 0:
+            rho, t1 = lines[i]
+            _, t2 = lines[i + 1]
+            lines[i] = [rho, (t1 + t2)/2]
+            lines.pop(i + 1)
+            continue
         gap_eps = eps * gap_mean
         # End window if its above eps, continue otherwise
         if abs(gap - gap_mean) > gap_eps:
@@ -122,7 +137,7 @@ def sort_Rho(lines, eps):
             l = i
         prev_gap = gap
         gap_average[-1] += gap
-
+        i += 1
     """
     Filters candidates, if there isn't any candidates totalling lines > 4
     The function will return the max lines candidate
@@ -130,7 +145,6 @@ def sort_Rho(lines, eps):
     if there is candidates totalling lines > 4
     Include all in sorted_list
     """
-
     sorted_list = []
     max_cand = 0 # Stored by index
     for i, cand in enumerate(candidates):
@@ -155,12 +169,13 @@ def gap_Interpolation(sorted_list, gap_average, image_shape):
     1)  The two groups have similar average gap value inside
     2)  The gap between the groups (not the gaps inside) is a multiple of the gap values
     3)  The sum or all lines WITH interpolated lines should not overcome a threshold,
-        should never be over 12 lines total.
+        should never be over 18 lines total.
     :param: sorted_list/gap_average: should be straight from sort_Rhos
     :return:
     """
     line_groups = sorted_list.copy()
     group_gaps = gap_average.copy()
+
     # Group gap = the gap in between the two groups
     # Average gap = the average gap WITHIN a group
     if len(sorted_list) < 2 or len(gap_average) < 2:
@@ -176,9 +191,11 @@ def gap_Interpolation(sorted_list, gap_average, image_shape):
         groupB = line_groups[i + 1]
         if len(groupA) == 0:
             line_groups.pop(i)
+            group_gaps.pop(i)
             continue
         if len(groupB) == 0:
             line_groups.pop(i + 1)
+            group_gaps.pop(i + 1)
             continue
 
         # Condition 1
@@ -187,7 +204,9 @@ def gap_Interpolation(sorted_list, gap_average, image_shape):
 
             # Condition 2
             groupA_end_rho = line_groups[i][-1][0]
-            groupB_start_rho = line_groups[i + 1][0][0]
+            # Since the groups are inclusive both end, we must skip the index since
+            # Last index of previous group == first index of next group
+            groupB_start_rho = line_groups[i + 1][1][0]
             group_gap = abs(groupB_start_rho - groupA_end_rho)
             group_average = (group_gaps[i] + group_gaps[i + 1]) / 2
             # Calculates if the group gap diff is a multiple by eps
@@ -200,7 +219,7 @@ def gap_Interpolation(sorted_list, gap_average, image_shape):
                 # Condition 3
                 # The multiplicity of the group gap indicates the amount of interpolated lines inbetween
                 total_lines = len(line_groups[i]) + (m_value - 1) + len(line_groups[i + 1])
-                if total_lines <= 12:
+                if total_lines <= 18:
 
                     # All conditions suffice
                     theta_avg = 0
@@ -210,12 +229,18 @@ def gap_Interpolation(sorted_list, gap_average, image_shape):
                         theta_avg += l[1]
                     theta_avg /= (len(groupA) + len(groupB))
 
-                    for i in range(1, m_value):
-                        line_groups[i].append([groupA_end_rho + (group_average * i), theta_avg])
-                    line_groups[i].extend(groupB)
+                    for j in range(1, m_value):
+                        line_groups[i].append([groupA_end_rho + (group_average * j), theta_avg])
+                    line_groups[i].extend(groupB[1:])
                     line_groups.pop(i + 1)
+                    group_gaps.pop(i + 1)
                     continue
-
+        i += 1
+    i = 0
+    while i < len(line_groups):
+        if len(line_groups[i]) < 3:
+            line_groups.pop(i)
+            continue
         i += 1
     return line_groups
 
@@ -238,7 +263,7 @@ def houghline_detect(edges, corners=None, mask=None, threshold=150, corner_eps=5
     lines = unpack_hough(cv2.HoughLines(e, 1, np.pi / 180, threshold=threshold))
     lines = fg.filter_similar_lines(lines, line_eps)
     if corners is not None:
-        lines = sh.filter_hough_lines_by_corners(lines, corners, tolerance=corner_eps)
+        lines = hcd.filter_hough_lines_by_corners(lines, corners, tolerance=corner_eps)
     return lines
 
 
@@ -284,6 +309,9 @@ def main():
     Filter lines by harris corners and similarity
     Run grid detection on filtered lines
     """
+    detection_params = [[11, 150, 200, 150, None, 1, 1.75],
+                        [7, 100, 150, 100, 0.5, 0.55, 1],
+                        [5, 85, 100, 80, 1.0, 0.25, 0.5]]
     image_name = "Real_Photos/Far,angled,solid.jpg"
     # 0 = strict, 1 = default
     detection_mode = 2
@@ -357,10 +385,9 @@ def main():
     gap_eps = 0.2 * settings[5]
 
     # Detection section
-    corners = sh.harris(blurred, image.shape, settings[4])
+    corners = hcd.harris(image, settings[0])
     good_lines, lines = houghline_detect(edges, corners, mask, settings[3], corner_eps, line_similarity_eps)
-    print(good_lines)
-    print(lines)
+    fg.static_cluster_lines(good_lines)
     # Too many lines breaks DBSCAN clustering
     # Clusters lines using DBSCAN with theta values
     clusters = fg.cluster_lines(good_lines, gap_eps)

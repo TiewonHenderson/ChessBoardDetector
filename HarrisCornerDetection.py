@@ -44,30 +44,8 @@ def cluster_duplicates(corner_points, eps):
     return unique_corners
 
 
-def remove_noise(corners, eps_factor=1.0):
-    """
-    :param corners: 2D python list representing cartesian corner points
-    :param eps_factor: scaling multiplier (larger == more lenient) for eps, which would represent typical distance
-    between corner points to be merged as a group
-    :return:
-    """
-    if corners is None or len(corners) < 2:
-        return corners
-
-    tree = KDTree(corners)
-    dists, _ = tree.query(corners, k=min(len(corners), 5))  # Use more neighbors for better estimation
-    gap_est = np.percentile(dists[:, 1], 50)  # Median of nearest neighbor distances
-    eps = max(eps_factor * gap_est, 1.0)
-    dbs_input = np.array(corners)
-    db = DBSCAN(eps=eps, min_samples=2, algorithm='ball_tree').fit(dbs_input)
-    labels = db.labels_
-    core_pts = list(dbs_input[labels != -1])
-
-    return core_pts
-
-
 # GPT generated
-def harris(image, ksize, filter_eps=None):
+def harris(image, ksize):
     """
     Inital function to return cartesian points representing corners
     :param image: Instance of image from cv2
@@ -97,8 +75,6 @@ def harris(image, ksize, filter_eps=None):
     corner_points = corner_points[:, [1, 0]]  # convert to (x, y)
     height, width, _ = image.shape
     eps = max(width, height) / 100
-    if filter_eps is not None:
-        return remove_noise(cluster_duplicates(corner_points, eps), eps_factor=filter_eps)
     return cluster_duplicates(corner_points, eps)
 
 
