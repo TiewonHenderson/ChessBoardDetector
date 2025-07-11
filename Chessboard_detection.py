@@ -39,9 +39,10 @@ gap_eps = [1.1, 0.85, 0.3]
 def image_load(image_name):
     """
     :param image_name: The path/name of the image within this dir
-    :return: A cv2 image instance
+    :return: A downscaled cv2 image instance, and an original image (can be None if no downscale)
     """
     image = cv2.imread(image_name)
+    old_image = None
     # Get image dimensions
     height, width, _ = image.shape
     if height * width > 2073600:
@@ -54,10 +55,9 @@ def image_load(image_name):
         new_width = int(width * scale_factor)
         new_height = int(height * scale_factor)
 
+        old_image = image.copy()
         image = cv2.resize(image, (new_width, new_height))
-        height = new_height
-        width = new_width
-    return image
+    return image, old_image
 
 
 def get_edges(image, ksize, edge_threshold1, edge_threshold2):
@@ -129,6 +129,16 @@ def cluster_lines(image, lines, cluster_eps, gap_eps, detection_mode):
         #     for i in range(len(lz)):
         #         print(lz[i])
         #         find_exact_line(image, lz, i)
+        """
+        Should be sorted as
+        [Theta clusters
+            [As group of lines (with similar gap)
+                [As lines
+                    [As rho, theta]
+                ]
+            ]
+        ]
+        """
         clusters[key] = ht.gap_Interpolation(sorted_list, gap_average, image.shape[:2])
     return list(clusters.values())
 
@@ -150,16 +160,16 @@ def check_all_grids(image, cluster_list, corners, d_mode):
     cluster_list = 4d array
     Each cluster stores similar theta groups that are stored in list of similar gaps by rho
     """
-    for i, theta in enumerate(cluster_list[1:], start=1):
+    for i in range(1, len(cluster_list)):
         c1 = cluster_list[i - 1]
         for g1 in c1:
             j = i
             while j < len(cluster_list):
                 c2 = cluster_list[j]
                 for g2 in c2:
-                    score = fg.check_grid_like(g1, g2, d_mode, image.shape, corners)
-                    clusters.append(g1.copy())
-                    clusters[-1].extend(g2.copy())
+                    score, intersect_list = fg.check_grid_like(g1, g2, d_mode, image.shape, corners)
+                    clusters.append([g1.copy()])
+                    clusters[-1].append(g2.copy())
                     scores.append(score)
                     j += 1
     return clusters, scores
@@ -167,8 +177,8 @@ def check_all_grids(image, cluster_list, corners, d_mode):
 
 def present_lines(image, clusters, scores, corners):
     """
-    :param image:
-    :param clusters:
+    :param image: The opencv instance of image to display the found grid lines
+    :param clusters: The cluster list that contains combined groups that recieved grid like score
     :param scores:
     :param corners:
     :return:
@@ -182,10 +192,13 @@ def present_lines(image, clusters, scores, corners):
 
         max_index = scores.index(max(scores))
         for i in range(len(clusters)):
+            g1, g2 = clusters[i]
             if i == max_index:
-                ht.put_lines(clusters[i], image, green, 2)
+                ht.put_lines(g1, image, green, 2)
+                ht.put_lines(g2, image, green, 2)
             else:
-                ht.put_lines(clusters[i], image, red, 1)
+                ht.put_lines(g1, image, red, 1)
+                ht.put_lines(g2, image, red, 1)
         ht.show_images(image)
 
 
@@ -209,18 +222,20 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
     :param image_name:
     :param thres_config:
     :param scalar_config:
-    :return:
+    :return: An image with
     """
 
     ksize, edge_thres1, edge_thres2, hline_thres = thres_config
     similar_houghline_eps, eps_scalar, cluster_eps, gap_eps = scalar_config
-    image = image_load(image_name)
+    image, origin_img = image_load(image_name)
+    if origin_img is None:
+        origin_img = image
     height, width, _ = image.shape
 
     # Epsilon list (suggested by GPT and tested)
     image_diagonal = np.hypot(width, height)
     line_similarity_eps = int(image_diagonal * 0.01) * similar_houghline_eps
-    corner_eps = int(image_diagonal * 0.05) * eps_scalar if d_mode < 2 else 1
+    corner_eps = int(image_diagonal * 0.005) * eps_scalar if d_mode < 2 else 1
     cluster_eps = 0.1 * cluster_eps
     gap_eps = 0.1 * gap_eps
 
@@ -248,6 +263,7 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
                                          hline_thres,
                                          corner_eps,
                                          line_similarity_eps)
+    print(lines)
     # lines = sorted(lines, key=lambda l: l[0])
     # for x in range(len(lines)):
     #     print(lines[x])
@@ -255,14 +271,15 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
     clusters = cluster_lines(image, good_lines, cluster_eps, gap_eps, d_mode)
     clusters, scores = check_all_grids(image, clusters, corners, d_mode)
 
+    print(clusters[scores.index(max(scores))])
     if len(scores) > 0 and max(scores) > 40:
-        present_lines(image, clusters, scores, corners)
+        present_lines(origin_img, clusters, scores, corners)
         return True
     else:
         clusters = cluster_lines(image, lines, cluster_eps, gap_eps, d_mode)
         clusters, scores = check_all_grids(image, clusters, corners, d_mode)
     if len(scores) > 0 and max(scores) > 20:
-        present_lines(image, clusters, scores, corners)
+        present_lines(origin_img, clusters, scores, corners)
         return True
 
     # NO FOUND GRID, TRY DIFFERENT SETTINGS
@@ -295,10 +312,10 @@ def main():
 
     detected = False
     i = 0
-    while not detected:
+    while not False:
         thres_config = (ksize[i], edge_thres1[i], edge_thres2[i], hline_thres[i])
         scalar_config = (similar_hline_eps[i], eps_scalar[i], cluster_eps[i], gap_eps[i])
-        detected = detect_chessboard(medium[0], thres_config, scalar_config, i)
+        detected = detect_chessboard(easy[1], thres_config, scalar_config, i)
         print('done: ', i)
         i += 1
 

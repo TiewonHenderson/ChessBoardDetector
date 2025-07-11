@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+from math import sin,cos
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
 from sklearn.metrics import pairwise_distances
@@ -111,8 +112,8 @@ def label_to_cluster(lines, labels):
     clusters_index = 0
     for amt, sum in sums:
         average = sum / amt
-        # Should not consider less then 4 lines for a 8x8 grid
-        if len(clusters[clusters_index]) < 4:
+        # Should not consider less then 2 lines for a 8x8 grid
+        if len(clusters[clusters_index]) < 2:
             continue
         if average in cluster_dict:
             cluster_dict[average].extend(clusters[clusters_index])
@@ -144,10 +145,9 @@ def dbscan_cluster_lines(lines, eps=0.1):
     """
     if len(lines) == 0:
         return {}
-    line_array = lines.copy()
     line_array = np.array([
-        [normalize_theta(theta)]
-        for rho, theta in line_array
+        [sin(normalize_theta(theta)), cos(normalize_theta(theta))]
+        for rho, theta in lines  # Use lines directly
     ])
     """
     DBSCAN expects a 2d np array representing points
@@ -202,30 +202,7 @@ def filter_similar_lines(lines, eps=11):
     return [[rho, theta] for rho, theta in filtered]
 
 
-def filter_similar_rho(clusters, eps):
-    """
-    This function also expects some filter process to happen beforehand
-    Otherwise meaning two lines consecutively could cause major offsetting
-    :param clusters: A 3D list of lines representing clusters of [rho, theta] lines
-    :param eps: Threhold to consider two rhos to be similar enough
-    :return: A filtered 3D list of clustered lines
-    """
-    line_clusters = clusters.copy()
-    for lines in line_clusters:
-        i = 0
-        while i < len(lines) - 1:
-            r1, t1= lines[i]
-            r2, t2 = lines[i + 1]
-            if abs(r2 - r1) < eps:
-                # replace the two lines as the new mean line
-                lines[i] = [(r1 + r2) / 2, (t1 + t2) / 2]
-                lines.pop(i + 1)
-            else:
-                i += 1
-    return line_clusters
-
-
-def check_grid_like(cluster1, cluster2, d_mode, image_shape=None, corners=[]):
+def check_grid_like(group1, group2, d_mode, image_shape=None, corners=[]):
     """
     Weight cases:
     For d_mode == 0, 1
@@ -240,14 +217,14 @@ def check_grid_like(cluster1, cluster2, d_mode, image_shape=None, corners=[]):
     High ratio of intersections being corners = 20/100
     Evenly spaced rho difference = 20/100
 
-    :param cluster1: Cluster of lines represented as an unpacked 2D list
-    :param cluster2: Cluster of lines represented as an unpacked 2D list
-    :return: [0,1] interval score representing confidence
+    :param group1: Cluster of lines represented as an unpacked 2D list
+    :param group2: Cluster of lines represented as an unpacked 2D list
+    :return: A score on how grid like the clu
     """
-    if len(cluster1) == 0 or len(cluster1) == 0:
+    if len(group1) == 0 or len(group2) == 0:
         return
-    cluster1.sort(key=lambda x: x[0])
-    cluster2.sort(key=lambda x: x[0])
+    group1.sort(key=lambda x: x[0])
+    group2.sort(key=lambda x: x[0])
 
     c_tree = None
     h = w = None
@@ -256,7 +233,7 @@ def check_grid_like(cluster1, cluster2, d_mode, image_shape=None, corners=[]):
         h, w, _ = image_shape
 
     # The more closer the amount of lines is to 2 * ([8,10]), the better
-    total_lines = len(cluster1) + len(cluster2)
+    total_lines = len(group1) + len(group2)
     total_intersect = 0
     corner_intersect = 0
     intersection_list = []
@@ -269,10 +246,10 @@ def check_grid_like(cluster1, cluster2, d_mode, image_shape=None, corners=[]):
     rho_dist_list2 = []
 
     # Section to find variance intersection between lines
-    for i, lines1 in enumerate(cluster1):
+    for i, lines1 in enumerate(group1):
         row = []
         prev_intersect_point = None
-        for j, lines2 in enumerate(cluster2):
+        for j, lines2 in enumerate(group2):
             intersect_point = intersection_polar_lines(lines1, lines2)
             if intersect_point is None:
                 # None is appended to keep grid align
@@ -315,11 +292,11 @@ def check_grid_like(cluster1, cluster2, d_mode, image_shape=None, corners=[]):
         intersection_list.append(row)
 
     # Section to find variance between line rhos
-    for i, line1 in enumerate(cluster1[1:], start=1):
-        dist = abs(cluster1[i - 1][0] - line1[0])
+    for i, line1 in enumerate(group1[1:], start=1):
+        dist = abs(group1[i - 1][0] - line1[0])
         rho_dist_list1.append(dist)
-    for i, line2 in enumerate(cluster2[1:], start=1):
-        dist = abs(cluster2[i - 1][0] - line2[0])
+    for i, line2 in enumerate(group2[1:], start=1):
+        dist = abs(group2[i - 1][0] - line2[0])
         rho_dist_list2.append(dist)
 
     # Final confidencce score to classify grid by lines
@@ -382,5 +359,12 @@ def check_grid_like(cluster1, cluster2, d_mode, image_shape=None, corners=[]):
     # print("Amount of intersections: ", total_intersect)
     # print("Amount of good intersection: ", corner_intersect)
     # print("Amount of lines: ", total_lines)
-    # print("Final score: ", score, "/ 100")
-    return score
+    print("Final score: ", score, "/ 100")
+    return score, intersection_list
+
+
+def sim_inserted_lines():
+    """
+    Given a sufficient score
+    :return:
+    """
