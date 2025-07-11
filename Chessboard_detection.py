@@ -5,6 +5,7 @@ import numpy as np
 from ChessBoardDetector import filter_grids as fg
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
+from ChessBoardDetector import Grid_Completion as gc
 
 """
 constant = the value is used as is
@@ -33,7 +34,7 @@ hline_thres = [150, 100, 80]
 similar_hline_eps = [1.75, 1, 0.5]
 eps_scalar = [1, 0.55, 0.25]
 cluster_eps = [1, 0.5, 0.2]
-gap_eps = [1.1, 0.85, 0.3]
+gap_eps = [1.5, 0.85, 0.3]
 
 
 def image_load(image_name):
@@ -106,8 +107,9 @@ def cluster_lines(image, lines, cluster_eps, gap_eps, detection_mode):
     :param detection_mode:
     :return:
     """
-    clusters = fg.dbscan_cluster_lines(lines, cluster_eps)
-    for key in clusters:
+    clusters = list(fg.dbscan_cluster_lines(lines, cluster_eps).values())
+    final_clusters = []
+    for c in clusters:
         """
         Sorts each cluster by rho value, then linearly scans to group each line by consistent gaps
 
@@ -122,7 +124,7 @@ def cluster_lines(image, lines, cluster_eps, gap_eps, detection_mode):
         #     for i in range(len(lz)):
         #         print(lz[i])
         #         find_exact_line(image, lz, i)
-        sorted_list, gap_average = ht.sort_Rho(clusters[key], gap_eps)
+        sorted_list, gap_average = ht.sort_Rho(c, gap_eps)
         # for x in sorted_list:
         #     lz = x
         #     print(lz)
@@ -139,8 +141,10 @@ def cluster_lines(image, lines, cluster_eps, gap_eps, detection_mode):
             ]
         ]
         """
-        clusters[key] = ht.gap_Interpolation(sorted_list, gap_average, image.shape[:2])
-    return list(clusters.values())
+        candidates = ht.gap_Interpolation(sorted_list, gap_average, image.shape[:2])
+        if len(candidates) != 0:
+            final_clusters.append(candidates)
+    return final_clusters
 
 
 def check_all_grids(image, cluster_list, corners, d_mode):
@@ -263,23 +267,23 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
                                          hline_thres,
                                          corner_eps,
                                          line_similarity_eps)
-    print(lines)
     # lines = sorted(lines, key=lambda l: l[0])
+    # find_exact_line(image, lines, 0, corners)
     # for x in range(len(lines)):
     #     print(lines[x])
     #     find_exact_line(image, lines, x, corners)
     clusters = cluster_lines(image, good_lines, cluster_eps, gap_eps, d_mode)
     clusters, scores = check_all_grids(image, clusters, corners, d_mode)
 
-    print(clusters[scores.index(max(scores))])
+    # print(clusters[scores.index(max(scores))])
     if len(scores) > 0 and max(scores) > 40:
-        present_lines(origin_img, clusters, scores, corners)
+        present_lines(image, clusters, scores, corners)
         return True
     else:
         clusters = cluster_lines(image, lines, cluster_eps, gap_eps, d_mode)
         clusters, scores = check_all_grids(image, clusters, corners, d_mode)
     if len(scores) > 0 and max(scores) > 20:
-        present_lines(origin_img, clusters, scores, corners)
+        present_lines(image, clusters, scores, corners)
         return True
 
     # NO FOUND GRID, TRY DIFFERENT SETTINGS
@@ -315,8 +319,15 @@ def main():
     while not False:
         thres_config = (ksize[i], edge_thres1[i], edge_thres2[i], hline_thres[i])
         scalar_config = (similar_hline_eps[i], eps_scalar[i], cluster_eps[i], gap_eps[i])
-        detected = detect_chessboard(easy[1], thres_config, scalar_config, i)
-        print('done: ', i)
+        # for j in range(len(easy)):
+        #     detected = detect_chessboard(easy[j], thres_config, scalar_config, i)
+        #     print('done: ', i)
+        # for j in range(len(medium)):
+        #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
+        #     print('done: ', i)
+        for j in range(len(hard)):
+            detect_chessboard(hard[j], thres_config, scalar_config, i)
+            print('done: ', i)
         i += 1
 
 

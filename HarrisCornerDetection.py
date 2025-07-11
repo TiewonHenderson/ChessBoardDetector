@@ -96,9 +96,10 @@ def hough_line_intersect(line, point, tolerance=5):
     return False
 
 
-def consistent_gaps(points):
+def consistent_gaps(points, get_variance=False):
     """
     :param points: list of [x,y], length must be >= 4
+    :param get_variance: Gets the variance of the points given instead of a boolean
     :return:
     """
     gaps = []
@@ -107,7 +108,11 @@ def consistent_gaps(points):
         dist = float(np.linalg.norm(a - b))
         if dist > 0.0001:
             gaps.append(dist)
-    # There aren't 4 points, or some points are too close to each other
+    # get variance instead of consistency evaluation
+    mean = np.mean(gaps)
+    if get_variance and mean != 0:
+        return np.std(gaps) / mean
+    # There arent enough points, or some points are too close to each other
     if len(gaps) < 3:
         return False
     min_gap = min(gaps)
