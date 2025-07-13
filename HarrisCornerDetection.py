@@ -1,3 +1,5 @@
+import sys
+
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -78,7 +80,7 @@ def harris(image, ksize):
     return cluster_duplicates(corner_points, eps)
 
 
-def hough_line_intersect(line, point, tolerance=5):
+def hough_line_intersect(line, point, tolerance=3):
     """
     :param line: [rho, theta]
     :param point: [x, y]
@@ -98,11 +100,19 @@ def hough_line_intersect(line, point, tolerance=5):
 
 def consistent_gaps(points, get_variance=False):
     """
+    CV Scoring:
+    consistent spacing  	< 0.07
+    somewhat structured	        0.10–0.15
+    Noisy / outlier	        > 0.20
+
+    Uses 0.15 during to 3d aspect we cannot control with images
     :param points: list of [x,y], length must be >= 4
     :param get_variance: Gets the variance of the points given instead of a boolean
     :return:
     """
     gaps = []
+    eps = 0.15
+
     for i in range(len(points) - 1):
         a, b = np.array(points[i]), np.array(points[i + 1])
         dist = float(np.linalg.norm(a - b))
@@ -110,22 +120,18 @@ def consistent_gaps(points, get_variance=False):
             gaps.append(dist)
     # get variance instead of consistency evaluation
     mean = np.mean(gaps)
-    if get_variance and mean != 0:
-        return np.std(gaps) / mean
+    cv = sys.maxsize
+    if mean > 0.0001:
+        cv = np.std(gaps) / mean
+    if get_variance:
+        return cv
     # There arent enough points, or some points are too close to each other
     if len(gaps) < 3:
         return False
-    min_gap = min(gaps)
-    eps = 0.1 * min_gap
-    for g in gaps:
-        ratio = g / min_gap
-        m = round(ratio)
-        if abs(ratio - m) > eps:
-            return False
-    return True
+    return cv < eps
 
 
-def filter_hough_lines_by_corners(lines, corners, tolerance=5, min_hits=4):
+def filter_hough_lines_by_corners(lines, corners, min_hits=4):
     """
 
     :param lines:
@@ -134,20 +140,18 @@ def filter_hough_lines_by_corners(lines, corners, tolerance=5, min_hits=4):
     :param min_hits: The amount of intersections a line needs to be added
     :return:
     """
-    filtered_lines = [[], []]
+    filtered_lines = []
     for l in lines:
         hits = []
         for point in corners:
-            if hough_line_intersect(l, point, tolerance):
+            if hough_line_intersect(l, point):
                 hits.append(point)
         if len(hits) == 0:
             continue
         # Attempts to get lines with consistent gaps as priority
         # Rest of intersected points are appended to 2nd list
-        if consistent_gaps(hits):
-            filtered_lines[0].append(l)
         if len(hits) >= min_hits:
-            filtered_lines[1].append(l)
+            filtered_lines.append(l)
     return filtered_lines
 
 

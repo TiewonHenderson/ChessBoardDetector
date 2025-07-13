@@ -3,6 +3,7 @@ import math
 import cv2
 import numpy as np
 from ChessBoardDetector import filter_grids as fg
+from ChessBoardDetector import CV_filter_groups as cvfg
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
 from ChessBoardDetector import Grid_Completion as gc
@@ -27,14 +28,14 @@ Or KMEANs (this eps doesn't affect it)
 7) gap_eps           [multiplier] for scaled epsilon between gaps, if the gap difference
 is below the eps, it gets accepted within a line group
 """
-ksize = [11, 7, 5]
-edge_thres1 = [150, 100, 85]
-edge_thres2 = [200, 150, 100]
-hline_thres = [150, 100, 80]
-similar_hline_eps = [1.75, 1, 0.5]
-eps_scalar = [1, 0.55, 0.25]
-cluster_eps = [1, 0.5, 0.2]
-gap_eps = [1.5, 0.85, 0.3]
+ksize = 7
+edge_thres1 = 100
+edge_thres2 = 150
+hline_thres = 100
+similar_hline_eps = 1
+eps_scalar = 0.55
+cluster_eps = 0.5
+gap_eps = 0.85
 
 
 def image_load(image_name):
@@ -44,7 +45,7 @@ def image_load(image_name):
     """
     image = cv2.imread(image_name)
     old_image = None
-    # Get image dimensions
+    scale_factor = None
     height, width, _ = image.shape
     if height * width > 2073600:
         max_width = 1920
@@ -58,7 +59,25 @@ def image_load(image_name):
 
         old_image = image.copy()
         image = cv2.resize(image, (new_width, new_height))
-    return image, old_image
+    return image, old_image, scale_factor if scale_factor is not None else 1
+
+
+def rescale_all(scale_factor, lines=[], corners=[]):
+    """
+
+    :param scale_factor:
+    :param lines:
+    :param corners:
+    :return: Returns rescaled lines, corners respectively determined by scale_factor
+    """
+    if scale_factor == 0 or scale_factor is None:
+        return lines, corners
+    inv_scale = 1 / scale_factor
+    # rescale lines by adding to rho (theta remains)
+    # Points are just multiplying both x and y by inverse of scale_factor
+    rescaled_lines = [[rho * inv_scale, theta] for rho,theta in lines]
+    rescaled_corners = [[x * inv_scale, y * inv_scale] for x,y in corners]
+    return rescaled_lines, rescaled_corners
 
 
 def get_edges(image, ksize, edge_threshold1, edge_threshold2):
@@ -76,14 +95,13 @@ def get_edges(image, ksize, edge_threshold1, edge_threshold2):
     return cv2.Canny(blurred, edge_threshold1, edge_threshold2)
 
 
-def houghLine_detect(edges, corners=None, mask=None, threshold=150, corner_eps=5, line_eps=11):
+def houghLine_detect(image_shape, edges, corners=None, mask=None, threshold=150):
     """
+    :param image_shape: [height, width] of the image
     :param edges: All the edges found from canny edge detection
     :param corners: A result from harris corner detection
     :param mask: A mask over the image to actually look for lines
     :param threshold: threshold in terms of votes for Hough line detection (used from settings list)
-    :param corner_eps: Epsilon value when filtering lines by corner intersection (how many pixel off is still accepted)
-    :param line_eps: Epsilon value when filtering out SIMILAR lines
     :return:
     """
     e = edges.copy()
@@ -91,10 +109,9 @@ def houghLine_detect(edges, corners=None, mask=None, threshold=150, corner_eps=5
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
     lines = ht.unpack_hough(cv2.HoughLines(e, 1, np.pi / 180, threshold=threshold))
-    lines = [fg.normalize_line(l) for l in lines]
-    lines = fg.filter_similar_lines(lines, line_eps)
     if corners is not None:
-        lines = hcd.filter_hough_lines_by_corners(lines, corners, tolerance=corner_eps)
+        lines = hcd.filter_hough_lines_by_corners(lines, corners)
+    lines = fg.filter_similar_lines(lines, image_shape)
     return lines
 
 
@@ -107,7 +124,15 @@ def cluster_lines(image, lines, cluster_eps, gap_eps, detection_mode):
     :param detection_mode:
     :return:
     """
-    clusters = list(fg.dbscan_cluster_lines(lines, cluster_eps).values())
+    # 1st round clusters needs top find 8-10 lines that represents one of the row/col lines
+    clusters, leftovers = cvfg.dbscan_cluster_lines(lines, image.shape[:2])
+    start_lines = None
+    for c in clusters:
+        print("cluster:", c)
+        start_lines = cvfg.get_starting_lines(c, image.shape[:2])
+        if start_lines is not None:
+            break
+    find_exact_line(image, start_lines, 0)
     final_clusters = []
     for c in clusters:
         """
@@ -118,12 +143,7 @@ def cluster_lines(image, lines, cluster_eps, gap_eps, detection_mode):
 
         saves the largest found group of parallel lines with consistent gaps
         """
-        # for key in clusters:
-        #     lz = clusters[key]
-        #     print(lz)
-        #     for i in range(len(lz)):
-        #         print(lz[i])
-        #         find_exact_line(image, lz, i)
+        find_exact_line(image, c, 0)
         sorted_list, gap_average = ht.sort_Rho(c, gap_eps)
         # for x in sorted_list:
         #     lz = x
@@ -192,7 +212,7 @@ def present_lines(image, clusters, scores, corners):
         green = (0, 255, 0)
         blue = (255, 0, 0)
         for x, y in corners:
-            cv2.circle(image, (x, y), 3, color=blue, thickness=-1)
+            cv2.circle(image, (int(x), int(y)), 3, color=blue, thickness=-1)
 
         max_index = scores.index(max(scores))
         for i in range(len(clusters)):
@@ -216,7 +236,7 @@ def find_exact_line(image, lines, index, corners=[]):
     ht.put_lines(line_x, img, (0, 255, 0))
     blue = (255, 0, 0)
     for x, y in corners:
-        cv2.circle(img, (x, y), 3, color=blue, thickness=-1)
+        cv2.circle(img, (int(x), int(y)), 3, color=blue, thickness=-1)
     ht.show_images(img)
 
 
@@ -231,15 +251,13 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
 
     ksize, edge_thres1, edge_thres2, hline_thres = thres_config
     similar_houghline_eps, eps_scalar, cluster_eps, gap_eps = scalar_config
-    image, origin_img = image_load(image_name)
+    image, origin_img, image_scale = image_load(image_name)
     if origin_img is None:
         origin_img = image
     height, width, _ = image.shape
 
     # Epsilon list (suggested by GPT and tested)
     image_diagonal = np.hypot(width, height)
-    line_similarity_eps = int(image_diagonal * 0.01) * similar_houghline_eps
-    corner_eps = int(image_diagonal * 0.005) * eps_scalar if d_mode < 2 else 1
     cluster_eps = 0.1 * cluster_eps
     gap_eps = 0.1 * gap_eps
 
@@ -261,32 +279,32 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
         255,
         thickness=-1
     )
-    good_lines, lines = houghLine_detect(edges,
-                                         corners,
-                                         mask,
-                                         hline_thres,
-                                         corner_eps,
-                                         line_similarity_eps)
-    # lines = sorted(lines, key=lambda l: l[0])
-    # find_exact_line(image, lines, 0, corners)
-    # for x in range(len(lines)):
-    #     print(lines[x])
-    #     find_exact_line(image, lines, x, corners)
-    clusters = cluster_lines(image, good_lines, cluster_eps, gap_eps, d_mode)
+    lines = houghLine_detect([height, width],
+                             edges,
+                             corners,
+                             mask,
+                             hline_thres)
+    if len(lines) <= 4:
+        return False
+    find_exact_line(image, lines, 0)
+    clusters = cluster_lines(image, lines, cluster_eps, gap_eps, d_mode)
     clusters, scores = check_all_grids(image, clusters, corners, d_mode)
+    if len(scores) > 0 and max(scores) > 30:
 
-    # print(clusters[scores.index(max(scores))])
-    if len(scores) > 0 and max(scores) > 40:
-        present_lines(image, clusters, scores, corners)
-        return True
-    else:
-        clusters = cluster_lines(image, lines, cluster_eps, gap_eps, d_mode)
-        clusters, scores = check_all_grids(image, clusters, corners, d_mode)
-    if len(scores) > 0 and max(scores) > 20:
-        present_lines(image, clusters, scores, corners)
+        # 1 means scaled by 1 (image resolution is as is)
+        if image_scale == 1:
+            present_lines(image, clusters, scores, corners)
+        else:
+            new_clusters = []
+            _, scaled_corners = rescale_all(image_scale, corners=corners)
+            for i, group_pairs in enumerate(clusters):
+                new_clusters.append([])
+                for j, group in enumerate(group_pairs):
+                    scaled_group, _ = rescale_all(image_scale, group)
+                    new_clusters[i].append(scaled_group)
+            present_lines(origin_img, new_clusters, scores, scaled_corners)
         return True
 
-    # NO FOUND GRID, TRY DIFFERENT SETTINGS
     return False
 
 
@@ -314,20 +332,33 @@ def main():
             "Real_Photos/Mid,somewhat_angled,flat2.jpg",
             "Real_Photos/Mid,very_angled,solid.jpg"]
 
+    test1 = ["Taken_Photos/left,25angle.png",
+            "Taken_Photos/left,random,25angle.png",
+            "Taken_Photos/top,random,rotated.png",
+            "Taken_Photos/top,random.png",
+            "Taken_Photos/top,rotated.png",
+            "Taken_Photos/top.png",
+            "Taken_Photos/left,65angle.png",
+             "Taken_Photos/left,random,45angle.png",
+             "Taken_Photos/left,rotated,45angle.png",
+             "Taken_Photos/left,rotated,random,45angle.png",
+             "Taken_Photos/left,rotated,65angle.png",
+             "Taken_Photos/left,rotated,random,65angle.png"
+            ]
+
     detected = False
-    i = 0
-    while not False:
-        thres_config = (ksize[i], edge_thres1[i], edge_thres2[i], hline_thres[i])
-        scalar_config = (similar_hline_eps[i], eps_scalar[i], cluster_eps[i], gap_eps[i])
+    i = 1
+    while not detected:
+        thres_config = (ksize, edge_thres1, edge_thres2, hline_thres)
+        scalar_config = (similar_hline_eps, eps_scalar, cluster_eps, gap_eps)
         # for j in range(len(easy)):
         #     detected = detect_chessboard(easy[j], thres_config, scalar_config, i)
         #     print('done: ', i)
         # for j in range(len(medium)):
         #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
         #     print('done: ', i)
-        for j in range(len(hard)):
-            detect_chessboard(hard[j], thres_config, scalar_config, i)
-            print('done: ', i)
+        for j in range(len(test1)):
+            detect_chessboard(test1[j], thres_config, scalar_config, i)
         i += 1
 
 

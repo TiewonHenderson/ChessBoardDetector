@@ -141,6 +141,8 @@ def dbscan_cluster_lines(lines, eps=0.1):
             0.1       =   5.72958
             0.05      =   2.864789
             0.02      =   1.145916
+
+        :param lines: unpacked 2D array of rho,theta values
         :param eps: The radian epsilon to cluster lines within
     """
     if len(lines) == 0:
@@ -161,7 +163,7 @@ def dbscan_cluster_lines(lines, eps=0.1):
 def kmeans_cluster_lines(lines):
     """
     Uses 1D KMeans to cluster theta (normalized)
-    :param lines:
+    :param lines: unpacked 2D array of rho,theta values
     :return:
     """
     line_array = lines.copy()
@@ -173,15 +175,26 @@ def kmeans_cluster_lines(lines):
     return label_to_cluster(lines, labels)
 
 
-def filter_similar_lines(lines, eps=11):
+def filter_similar_lines(lines, image_shape):
     """
     Filters similar lines by checking if rho and theta differences are below thresholds
     Compares orientation
+
+    rho_eps = 0.0264 * min(W, H)
+    Which is the minimum gap expected
+
+    theta_eps = 0.0175 radian = ~1 degree
+
+    :param lines: unpacked 2D array of rho,theta values
+    :param image_shape: [height, width] of the image
     """
     if len(lines) == 0:
         return lines
 
     filtered = []
+    h, w = image_shape
+    rho_eps = 0.0264 * min(h, w)
+    theta_eps = 0.0175
 
     for rho, theta in lines:
         too_close = False
@@ -189,8 +202,8 @@ def filter_similar_lines(lines, eps=11):
 
         for filtered_rho, filtered_theta in filtered:
             # Check if both rho and theta values are close
-            rho_close = abs(rho - filtered_rho) < eps
-            theta_close = abs(theta - filtered_theta) < np.deg2rad(int(eps/4))
+            rho_close = abs(rho - filtered_rho) < rho_eps
+            theta_close = abs(theta - filtered_theta) < theta_eps
 
             if rho_close and theta_close:
                 too_close = True
@@ -234,6 +247,8 @@ def check_grid_like(group1, group2, d_mode, image_shape=None, corners=[]):
 
     # The more closer the amount of lines is to 2 * ([8,10]), the better
     total_lines = len(group1) + len(group2)
+    if total_lines <= 4:
+        return 0, []
     total_intersect = 0
     corner_intersect = 0
     intersection_list = []

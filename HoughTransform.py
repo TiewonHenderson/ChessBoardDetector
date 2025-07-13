@@ -14,6 +14,18 @@ def put_lines(lines, image, color, thickness=2):
             cv2.line(image, points[0], points[1], color=color, thickness=thickness)
 
 
+def slope_from_theta(theta, max):
+    """
+    The max slope for the lines would be the height of the image
+    :param theta: Theta to convert to slope
+    :param max: The height of the image
+    :return: Slope of the line cooresponding to the theta inputted
+    """
+    if np.isclose(np.sin(theta), 0):
+        return max
+    return -np.cos(theta) / np.sin(theta)
+
+
 def show_images(image):
     # Display the result (GPT)
     cv2.imshow("",image)
@@ -90,29 +102,6 @@ def orthogonal_gap(line1, line2):
         return delta_rho
 
 
-def houghline_detect(edges, corners=None, mask=None, threshold=150, corner_eps=5, line_eps=10):
-    """
-
-    :param edges: All the edges found from canny edge detection
-    :param corners: A result from harris corner detection
-    :param mask: A mask over the image to actually look for lines
-    :param threshold: threshold in terms of votes for Hough line detection (used from settings list)
-    :param corner_eps: Epsilon value when filtering lines by corner intersection (how many pixel off is still accepted)
-    :param line_eps: Epsilon value when filtering out SIMILAR lines
-    :return:
-    """
-    e = edges.copy()
-    if mask is not None:
-        # Remove edges where mask is set as 0
-        e[mask == 0] = 0
-    lines = unpack_hough(cv2.HoughLines(e, 1, np.pi / 180, threshold=threshold))
-    lines = fg.filter_similar_lines(lines, line_eps)
-    if corners is not None:
-        lines = hcd.filter_hough_lines_by_corners(lines, corners, tolerance=corner_eps)
-    return lines
-
-
-
 def sort_Rho(lines, eps):
     """
     Sort and groups lines by their rho (distance to the original, top left of images)
@@ -124,37 +113,37 @@ def sort_Rho(lines, eps):
     :return: A 2D list that are grouped based off gap between them,
             with a 1D array representing gap average of each group of lines
     """
-    lines.sort(key=lambda x: x[0])
+    # Not enough lines to be considered a grid
+    if len(lines) <= 4:
+        return [lines], []
+    copy_line = [fg.normalize_line(line) for line in lines]
+    copy_line.sort(key=lambda x: x[0])
     # temp = []
     # for i in range(0, len(lines) - 1):
     #     temp.append(abs(lines[i][0] - lines[i + 1][0]))
     # print("gaps: ", temp)
 
-    # Not enough lines to be considered a grid
-    if len(lines) <= 4:
-        return [lines], []
-
-    prev_gap = abs(orthogonal_gap(lines[0], lines[1]))
+    prev_gap = abs(orthogonal_gap(copy_line[0], copy_line[1]))
     candidates = []
     gap_average = [prev_gap]
     l = 0
     i = 1
     # print("prev_gap", prev_gap)
-    while i <= len(lines) - 1:
+    while i <= len(copy_line) - 1:
         gap_mean = gap_average[-1] / (i - l)
-        if i == len(lines) - 1:
+        if i == len(copy_line) - 1:
             gap_average[-1] = gap_mean
             candidates.append([l, i])
             break
-        gap = abs(orthogonal_gap(lines[i], lines[i + 1]))
+        gap = abs(orthogonal_gap(copy_line[i], copy_line[i + 1]))
         # print("gap", gap)
         # print("gap mean", gap_average)
         # Since these are clustered as similar theta, same rho should be combined into 1 line
         if gap == 0:
-            rho, t1 = lines[i]
-            _, t2 = lines[i + 1]
-            lines[i] = [rho, (t1 + t2)/2]
-            lines.pop(i + 1)
+            rho, t1 = copy_line[i]
+            _, t2 = copy_line[i + 1]
+            copy_line[i] = [rho, (t1 + t2)/2]
+            copy_line.pop(i + 1)
             continue
         gap_eps = eps * gap_mean
         # print("gap eps:", gap_eps)
@@ -180,12 +169,12 @@ def sort_Rho(lines, eps):
         group_len = abs(cand[1] - cand[0])
         prev_max_len = abs(candidates[max_cand][1] - candidates[max_cand][0])
         # range() is [x,y), doesn't include y
-        sorted_list.append([lines[i] for i in range(cand[0], cand[1] + 1)])
+        sorted_list.append([copy_line[i] for i in range(cand[0], cand[1] + 1)])
         if group_len > prev_max_len:
             max_cand = i
     if len(sorted_list) == 0:
         start, end = candidates[max_cand]
-        return [[lines[i] for i in range(start, end + 1)]], gap_average
+        return [[copy_line[i] for i in range(start, end + 1)]], gap_average
     return sorted_list, gap_average
 
 

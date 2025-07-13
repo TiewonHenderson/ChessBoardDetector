@@ -1,38 +1,46 @@
 import sys
 import numpy as np
 from math import sin,cos
+from ChessBoardDetector import HarrisCornerDetection as hcd
+from ChessBoardDetector import filter_grids as fg
+"""
 
 
-def insert_dummy_lines(cluster):
+"""
+
+def insert_dummy_lines(groups):
     """
-
-    :param cluster: Expected 2 lists of lists containing houghline [rho, theta] values, with list sorted by rhos
+    Currently doesn't extend with the original lines
+    :param groups: Expected 2 lists of lists containing houghline [rho, theta] values, with list sorted by rhos
     :return:
     """
-    if len(cluster) != 2 or len(cluster[0]) == 0 or len(cluster[1]) == 0:
+    if len(groups) != 2 or len(groups[0]) == 0 or len(groups[1]) == 0:
         return None
 
     dummies = [[], []]
-    for i in range(len(cluster)):
+    complete_group = [[], []]
+    for i in range(len(groups)):
         # How many lines needs to be artifically inserted
-        needed_lines = 8 - len(cluster[i])
+        needed_lines = 8 - len(groups[i])
+        if needed_lines <= 0:
+            continue
         temp_group = []
         left = -needed_lines
         right = -1
-        min_line = cluster[i][0]
-        max_line = cluster[i][-1]
+        min_line = groups[i][0]
+        max_line = groups[i][-1]
         # gap_mean is used to insert dummy lines with multipled gaps to form a uniform group of lines
         # Means of theta is used to generate lines with this theta
         gap_mean = 0
         theta_mean = 0
-        for j in range(len(cluster[i])):
-            rho, theta = cluster[i][j]
+        for j in range(len(groups[i])):
+            rho, theta = groups[i][j]
             theta_mean += theta
-            if j == len(cluster[i]) - 1:
+            if j == len(groups[i]) - 1:
                 break
-            gap_mean += abs(cluster[i][j + 1][0] - rho)
-        theta_mean /= len(cluster[i])
-        gap_mean /= len(cluster[i]) - 1
+            gap_mean += abs(groups[i][j + 1][0] - rho)
+        theta_mean /= len(groups[i])
+        gap_mean /= len(groups[i]) - 1
         for created in range(needed_lines + 1):
             # need interval from [-n, -1] to represent needed gaps
             # cannot include 0, and [-n, -1] represents subtracting gap by min rho
@@ -44,11 +52,11 @@ def insert_dummy_lines(cluster):
             if right == 0:
                 right = -1
             temp_group.append([left, right])
-        print(temp_group)
         # Adds dummy lines into each group
         for interval in temp_group:
             left, right = interval
             dummies[i].append([])
+            complete_group[i].append([])
             # The reference rho to offset off of,
             # its min_line's rho for negative multiples
             # max_line's rho for positive multiples
@@ -58,55 +66,68 @@ def insert_dummy_lines(cluster):
                     continue
                 # If interval has 1 included, put copy before adding any dummy lines
                 # This doesn't work for ending -1, thats extended later
-                # if multiple == 1 or left == multiple == 1:
-                #     dummies[i][-1].extend(cluster[i].copy())
-                #     ref_rho = max_line[0]
+                if multiple == 1 or left == multiple == 1:
+                    complete_group[i][-1].extend(groups[i].copy())
+                    ref_rho = max_line[0]
+                complete_group[i][-1].append([ref_rho + (multiple * gap_mean), theta_mean])
                 dummies[i][-1].append([ref_rho + (multiple * gap_mean), theta_mean])
             # Extend for [-n, -1] interval
-            # dummies[i][0].extend(cluster[i].copy())
+            complete_group[i][0].extend(groups[i].copy())
 
-    for clusters in dummies:
-        print("cluster")
-        for groups in clusters:
-            print(len(groups))
-            print(groups)
+    # for clusters in dummies:
+    #     print("cluster")
+    #     for groups in clusters:
+    #         print(len(groups))
+    #         print(groups)
 
-    return dummies
+    return dummies, complete_group
 
 
-def closest_line(line_list, line, threshold):
+def closest_line(line_list, line):
     """
-    :param line_list:
-    :param line:
-    :return:
+    Given a list of houghlines, this function linearly search through to find the closest line
+    in terms of normalizing rho and theta differences between the houghline and given line with
+    the range of line_list
+
+    Combining both normalized rho and theta to meet below the threshold to be accepted
+    :param line_list: a list of houghlines represented as [rho, theta]
+    :param line: The polar coordinate line to search through line_list for most similar line under threshold
+    :return: A index within line_list representing the most similar line, None if it doesn't exist,
+             difference represents the lowest difference found throughout the line,
+             if threshold was greater then returned difference, a line WOULD be returned
     """
     if len(line_list) == 0 or line is None:
         return None, None
 
     min_distance = sys.maxsize
-    difference = ()
     min_index = -1
+
     # Find the ranges for normalization
     rhos = [rho for rho, _ in line_list]
-    thetas = [theta for _, theta in line_list]
+    thetas = [fg.normalize_theta(theta) for _, theta in line_list]
 
+    # AI suggest to find range to scale difference by the two elements
     rho_range = max(rhos) - min(rhos) if max(rhos) != min(rhos) else 1
-    theta_range = max(thetas) - min(thetas) if max(thetas) != min(thetas) else 1
 
-    for i, rho, theta in enumerate(line_list):
+    # For line orientation, A line can only wrap around pi to become itself again
+    theta_range = np.pi
+
+    for i in range(len(line_list)):
+        rho, theta = rhos[i], thetas[i]
         diff_rho = abs(rho - line[0]) / rho_range
-        diff_theta = abs(theta - line[1]) / theta_range
+        # This would get orientation wise minimum difference between the line
+        theta_diff = abs(theta - line[1])
+        theta_diff = min(theta_diff, np.pi - theta_diff)
+
+        diff_theta = theta_diff / theta_range
 
         distance = diff_rho + diff_theta
 
         if distance < min_distance:
             min_distance = distance
-            difference = (diff_rho, diff_theta)
             min_index = i
 
-    if min_distance <= threshold:
-        return min_index, difference
-    return None, difference
+    return min_index, min_distance
 
 
 def closest_corner(corners, line):
@@ -151,20 +172,26 @@ def check_dummy_lines(dummies, lines, corners):
     :param corners: A 2D list of points representing cartesian points
     :return:
     """
+    if len(lines) < 20:
+        None
     scores = [[] for i in range(len(dummies))]
+    best_lines = []
     for i, cluster_i in enumerate(dummies):
         for j, groups in enumerate(cluster_i):
-            # Dummy line outcome will store
+            # Dummy line outcome will store a list of
             # [ closest line threshold needed (to see if a houghline can verify the line exist),
             #   corners that were considered intersected, check the gap consistency afterwards
             # ]
             dummy_line_outcome = []
-            for l in groups:
+            usable_lines = lines.copy()
+            for k, l in enumerate(groups):
                 # The more lenient the threshold, the less score given
                 # If no lines were found, it will scale heavily
 
-                # Threshold for line similarity: difference_eps -> [0.1, 0.5] bounds inclusive
-                min_index, difference = closest_line(lines, l, 0.5)
+                # HAS TO return a closest line, we need 8x8 lines to form a chessboard grid
+                min_index, difference = closest_line(usable_lines, l)
+                dummies[i][j][k] = usable_lines[min_index]
+                usable_lines.pop(min_index)
 
                 # Threshold for corner intersection: pixel_offset -> [1, 5] bounds inclusive
                 intersect_corners = []
@@ -172,8 +199,55 @@ def check_dummy_lines(dummies, lines, corners):
                 for dist, c in top_corners:
                     if dist <= 5:
                         intersect_corners.append(c)
-                dummy_line_outcome.append([difference, consistent_gaps(intersect_corners, True)])
-            scores[i].append(dummy_line_outcome)
+
+                # Two intersections will cause inflated gap variance score
+                if len(intersect_corners) > 2:
+                    dummy_line_outcome.append([difference, len(intersect_corners),
+                                                            hcd.consistent_gaps(intersect_corners, True)])
+                else:
+                    dummy_line_outcome.append([difference, len(intersect_corners), None])
+
+            # Averages the outcome from difference (threshold needed for the nearest line)
+            # Scores Harris corners intersection using coefficient variance (less variance = better)
+            # Less then 2 corners makes no sense to get the CV, use amount of corners intersect instead
+            # < 0.2 is good, < 0.275 is acceptable
+            line_score = 0
+            corner_score = 0
+            for outcome in dummy_line_outcome:
+                difference, corner_num, corner_cv = outcome
+                line_score += max(0, 0.5 - difference)
+                if corner_num <= 2:
+                    corner_score += 0.1 * corner_num
+                else:
+                    corner_score += corner_num * (0.3 * max(0, 1 - (corner_cv / 0.25) ** 4))
+            line_score /= len(dummy_line_outcome)
+            corner_score /= len(dummy_line_outcome)
+
+            # Final score just the average of the two, might change in the future
+            final_score = (line_score + corner_score)/ 2
+            scores[i].append(final_score)
+        # Gets the min (represents the closest to existing lines and least variance)
+        best_lines.append(scores[i].index(max(scores[i])))
+
+    return best_lines
+
+
+def grid_interpolation(groups, lines, corners):
+    """
+
+    :param groups:
+    :param lines:
+    :param corners:
+    :return:
+    """
+    g1, g2 = groups
+    dummies, grid_groups = insert_dummy_lines(groups)
+    labels = check_dummy_lines(grid_groups, lines, corners)
+    print("len1:", len(grid_groups[0][labels[0]]))
+    print(grid_groups[0][labels[0]])
+    print("len2:", len(grid_groups[0][labels[0]]))
+    print(grid_groups[1][labels[1]])
+    return [grid_groups[0][labels[0]], grid_groups[1][labels[1]]]
 
 
 def main():
