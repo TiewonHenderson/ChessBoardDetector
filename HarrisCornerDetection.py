@@ -4,27 +4,18 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.cluster import DBSCAN
+from sklearn.cluster import KMeans
 from scipy.spatial import KDTree
 
 
-def plot_points(points):
-    """
-    Plots a set of 2D points.
+def show_corners(image, points):
+    # AI generated to only see points
+    for x, y in points:
+        cv2.circle(image, (x, y), radius=3, color=(0, 255, 255), thickness=1)
 
-    Args:
-        points: List or array of [x, y] points, shape (N, 2).
-        title: Optional title for the plot.
-        show: Whether to call plt.show() immediately.
-    """
-    points = np.array(points)  # Convert to numpy array if not already
-
-    plt.figure(figsize=(6, 6))
-    plt.scatter(points[:, 0], points[:, 1], c='blue', s=30, marker='o')
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.axis('equal')
-    plt.grid(True)
-    plt.show()
+    cv2.imshow("Harris Corners with Circles", image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
 
 
 def cluster_duplicates(corner_points, eps):
@@ -77,10 +68,11 @@ def harris(image, ksize):
     corner_points = corner_points[:, [1, 0]]  # convert to (x, y)
     height, width, _ = image.shape
     eps = max(width, height) / 100
+
     return cluster_duplicates(corner_points, eps)
 
 
-def hough_line_intersect(line, point, tolerance=3):
+def hough_line_intersect(line, point, tolerance=1):
     """
     :param line: [rho, theta]
     :param point: [x, y]
@@ -111,10 +103,12 @@ def consistent_gaps(points, get_variance=False):
     :return:
     """
     gaps = []
-    eps = 0.15
+    eps = 0.4
 
-    for i in range(len(points) - 1):
-        a, b = np.array(points[i]), np.array(points[i + 1])
+    points_copy = points.copy()
+    points_copy.sort(key=lambda x: x[0])
+    for i in range(len(points_copy) - 1):
+        a, b = np.array(points_copy[i]), np.array(points_copy[i + 1])
         dist = float(np.linalg.norm(a - b))
         if dist > 0.0001:
             gaps.append(dist)
@@ -131,7 +125,7 @@ def consistent_gaps(points, get_variance=False):
     return cv < eps
 
 
-def filter_hough_lines_by_corners(lines, corners, min_hits=4):
+def filter_hough_lines_by_corners(lines, corners, min_hits=3):
     """
 
     :param lines:

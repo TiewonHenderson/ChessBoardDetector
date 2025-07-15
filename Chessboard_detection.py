@@ -80,22 +80,7 @@ def rescale_all(scale_factor, lines=[], corners=[]):
     return rescaled_lines, rescaled_corners
 
 
-def get_edges(image, ksize, edge_threshold1, edge_threshold2):
-    """
-    Gets edges by:
-    Gaussian Blur
-    Canny edge detection
-
-    :param image: An opencv2 instance of image opened
-    :param setting: A 1D list from detection_params to set threshold and epsilon values
-    :return: A 2D python list of binary edges
-    """
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (ksize, ksize), 1)
-    return cv2.Canny(blurred, edge_threshold1, edge_threshold2)
-
-
-def houghLine_detect(image_shape, edges, corners=None, mask=None, threshold=150):
+def houghLine_detect(image_shape, edges, corners, mask=None, threshold=150):
     """
     :param image_shape: [height, width] of the image
     :param edges: All the edges found from canny edge detection
@@ -115,59 +100,61 @@ def houghLine_detect(image_shape, edges, corners=None, mask=None, threshold=150)
     return lines
 
 
-def cluster_lines(image, lines, cluster_eps, gap_eps, detection_mode):
+def cluster_lines(image, lines, cluster_eps, gap_eps):
     """
 
     :param image:
     :param lines:
     :param gap_eps:
-    :param detection_mode:
     :return:
     """
     # 1st round clusters needs top find 8-10 lines that represents one of the row/col lines
-    clusters, leftovers = cvfg.dbscan_cluster_lines(lines, image.shape[:2])
-    start_lines = None
-    for c in clusters:
-        print("cluster:", c)
-        start_lines = cvfg.get_starting_lines(c, image.shape[:2])
-        if start_lines is not None:
-            break
-    find_exact_line(image, start_lines, 0)
-    final_clusters = []
-    for c in clusters:
-        """
-        Sorts each cluster by rho value, then linearly scans to group each line by consistent gaps
-
-        gap_Interpolation returns potentially combined intervals if gaps are consistent or multiples of
-        each other (possibly indicating missing grid lines)
-
-        saves the largest found group of parallel lines with consistent gaps
-        """
-        find_exact_line(image, c, 0)
-        sorted_list, gap_average = ht.sort_Rho(c, gap_eps)
-        # for x in sorted_list:
-        #     lz = x
-        #     print(lz)
-        #     for i in range(len(lz)):
-        #         print(lz[i])
-        #         find_exact_line(image, lz, i)
-        """
-        Should be sorted as
-        [Theta clusters
-            [As group of lines (with similar gap)
-                [As lines
-                    [As rho, theta]
-                ]
-            ]
-        ]
-        """
-        candidates = ht.gap_Interpolation(sorted_list, gap_average, image.shape[:2])
-        if len(candidates) != 0:
-            final_clusters.append(candidates)
-    return final_clusters
+    # clusters, leftovers, theta_labels = cvfg.kmeans_cluster_lines(lines, image.shape[:2])
+    clusters = cvfg.kmeans_cluster_lines(lines, image.shape[:2])
+    start_lines = []
+    for i, c in enumerate(clusters):
+        print(i, c)
+        temp = cvfg.has_vanishing_point(c, image.shape[:2])
+        if len(temp) > len(start_lines) and len(temp) < 12:
+            start_lines = temp
+        find_exact_line(image, temp, 0)
 
 
-def check_all_grids(image, cluster_list, corners, d_mode):
+    # final_clusters = []
+    # for c in clusters:
+    #     """
+    #     Sorts each cluster by rho value, then linearly scans to group each line by consistent gaps
+    #
+    #     gap_Interpolation returns potentially combined intervals if gaps are consistent or multiples of
+    #     each other (possibly indicating missing grid lines)
+    #
+    #     saves the largest found group of parallel lines with consistent gaps
+    #     """
+    #
+    #     sorted_list, gap_average = ht.sort_Rho(c, gap_eps)
+    #     # for x in sorted_list:
+    #     #     lz = x
+    #     #     print(lz)
+    #     #     for i in range(len(lz)):
+    #     #         print(lz[i])
+    #     #         find_exact_line(image, lz, i)
+    #     """
+    #     Should be sorted as
+    #     [Theta clusters
+    #         [As group of lines (with similar gap)
+    #             [As lines
+    #                 [As rho, theta]
+    #             ]
+    #         ]
+    #     ]
+    #     """
+    #     candidates = ht.gap_Interpolation(sorted_list, gap_average, image.shape[:2])
+    #     if len(candidates) != 0:
+    #         final_clusters.append(candidates)
+    # return final_clusters
+
+
+def check_all_grids(image, cluster_list, corners):
     """
 
     :param image:
@@ -191,7 +178,7 @@ def check_all_grids(image, cluster_list, corners, d_mode):
             while j < len(cluster_list):
                 c2 = cluster_list[j]
                 for g2 in c2:
-                    score, intersect_list = fg.check_grid_like(g1, g2, d_mode, image.shape, corners)
+                    score, intersect_list = fg.check_grid_like(g1, g2, image.shape, corners)
                     clusters.append([g1.copy()])
                     clusters[-1].append(g2.copy())
                     scores.append(score)
@@ -228,6 +215,9 @@ def present_lines(image, clusters, scores, corners):
 
 def find_exact_line(image, lines, index, corners=[]):
 
+    if len(lines) == 0:
+        print("NO LINES")
+        return
     img = image.copy()
     l_copy = lines.copy()
     line_x = [l_copy[index]]
@@ -261,8 +251,12 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
     cluster_eps = 0.1 * cluster_eps
     gap_eps = 0.1 * gap_eps
 
-    edges = get_edges(image, ksize, edge_thres1, edge_thres2)
     corners = hcd.harris(image, ksize)
+
+    # GPT generate to make corner binary map
+    binary_map = np.zeros((height, width), dtype=np.uint8)
+    for x, y in corners:
+        binary_map[int(y), int(x)] = 255  # Note: OpenCV uses (y, x) order for indexing
 
     # Filter outer pixels by using a binary mask mask,
     # lines from those areas are generally not part of the chessboard
@@ -279,33 +273,47 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
         255,
         thickness=-1
     )
+    print("Doing lines")
     lines = houghLine_detect([height, width],
-                             edges,
+                             binary_map,
                              corners,
                              mask,
-                             hline_thres)
+                             3)
+    for x, y in corners:
+        cv2.circle(image, (x, y), radius=3, color=(0, 255, 255), thickness=1)
+    #
+    # lines.sort(key=lambda x: x[1])
+    # for x in range(len(lines)):
+    #     print(lines[x])
+    #     find_exact_line(image, lines, x)
+    find_exact_line(image, lines, 0)
+
     if len(lines) <= 4:
         return False
-    find_exact_line(image, lines, 0)
-    clusters = cluster_lines(image, lines, cluster_eps, gap_eps, d_mode)
-    clusters, scores = check_all_grids(image, clusters, corners, d_mode)
-    if len(scores) > 0 and max(scores) > 30:
+    clusters = cluster_lines(image, lines, cluster_eps, gap_eps)
 
-        # 1 means scaled by 1 (image resolution is as is)
-        if image_scale == 1:
-            present_lines(image, clusters, scores, corners)
-        else:
-            new_clusters = []
-            _, scaled_corners = rescale_all(image_scale, corners=corners)
-            for i, group_pairs in enumerate(clusters):
-                new_clusters.append([])
-                for j, group in enumerate(group_pairs):
-                    scaled_group, _ = rescale_all(image_scale, group)
-                    new_clusters[i].append(scaled_group)
-            present_lines(origin_img, new_clusters, scores, scaled_corners)
-        return True
+    # for l in range(len(clusters)):
+    #     print(clusters[l])
+    #     find_exact_line(image, clusters, l)
 
-    return False
+    # clusters, scores = check_all_grids(image, clusters, corners)
+    # if len(scores) > 0 and max(scores) >= 30:
+    #
+    #     # 1 means scaled by 1 (image resolution is as is)
+    #     if image_scale == 1:
+    #         present_lines(image, clusters, scores, corners)
+    #     else:
+    #         new_clusters = []
+    #         _, scaled_corners = rescale_all(image_scale, corners=corners)
+    #         for i, group_pairs in enumerate(clusters):
+    #             new_clusters.append([])
+    #             for j, group in enumerate(group_pairs):
+    #                 scaled_group, _ = rescale_all(image_scale, group)
+    #                 new_clusters[i].append(scaled_group)
+    #         present_lines(origin_img, new_clusters, scores, scaled_corners)
+    #     return True
+    #
+    # return False
 
 
 def main():
@@ -357,8 +365,8 @@ def main():
         # for j in range(len(medium)):
         #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
         #     print('done: ', i)
-        for j in range(len(test1)):
-            detect_chessboard(test1[j], thres_config, scalar_config, i)
+        for j in range(len(medium)):
+            detect_chessboard(medium[j], thres_config, scalar_config, i)
         i += 1
 
 

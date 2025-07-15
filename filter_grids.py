@@ -37,7 +37,7 @@ def intersection_polar_lines(line1, line2, eps=1e-6):
 
     # solves system of equations for both lines' ax+by=ρ equation
     x, y = np.linalg.solve(A, B)
-    return (x, y)
+    return [round(x), round(y)]
 
 
 def normalize_theta(theta):
@@ -148,8 +148,8 @@ def dbscan_cluster_lines(lines, eps=0.1):
     if len(lines) == 0:
         return {}
     line_array = np.array([
-        [sin(normalize_theta(theta)), cos(normalize_theta(theta))]
-        for rho, theta in lines  # Use lines directly
+        [normalize_theta(theta)]
+        for _, theta in lines  # Use lines directly
     ])
     """
     DBSCAN expects a 2d np array representing points
@@ -168,8 +168,8 @@ def kmeans_cluster_lines(lines):
     """
     line_array = lines.copy()
     line_array = np.array([
-        [np.cos(theta), np.sin(theta)]
-        for rho, theta in line_array
+        [theta % np.pi]
+        for _, theta in line_array
     ])
     labels = KMeans(n_clusters=2, n_init='auto').fit_predict(line_array)
     return label_to_cluster(lines, labels)
@@ -215,20 +215,14 @@ def filter_similar_lines(lines, image_shape):
     return [[rho, theta] for rho, theta in filtered]
 
 
-def check_grid_like(group1, group2, d_mode, image_shape=None, corners=[]):
+def check_grid_like(group1, group2, image_shape=None, corners=[]):
     """
     Weight cases:
-    For d_mode == 0, 1
     Evenly spaced intersections = 30/100
     High ratio of intersections being corners = 30/100
     Evenly spaced rho difference = 20/100
     Amount of lines = 20/100
 
-    For d_mode == 2
-    Amount of lines = 40/100
-    Evenly spaced intersections = 20/100
-    High ratio of intersections being corners = 20/100
-    Evenly spaced rho difference = 20/100
 
     :param group1: Cluster of lines represented as an unpacked 2D list
     :param group2: Cluster of lines represented as an unpacked 2D list
@@ -317,8 +311,8 @@ def check_grid_like(group1, group2, d_mode, image_shape=None, corners=[]):
     # Final confidencce score to classify grid by lines
     score = 0
     max_cv = 0.20
-    intersect_points = 30 if d_mode < 2 else 20
-    line_points = 20 if d_mode < 2 else 40
+    intersect_points = 30
+    line_points = 20
 
     """
     Variance scoring
@@ -358,7 +352,16 @@ def check_grid_like(group1, group2, d_mode, image_shape=None, corners=[]):
     c2_cv = np.std(np.array(rho_dist_list2)) / c2_mean
     aver_cluster_cv = (c1_cv + c2_cv) / 2
 
-    score += scaled_scoring(aver_cluster_cv, max_cv, 20, 2)
+    """
+    Relative Difference of the gap means should be small (idea from GPT)
+    The gaps should be consistent throughout
+    If gap_mean relative difference is too much, no points can be given from
+    Evenly spaced intersections, Evenly spaced rho difference
+    """
+    # if abs(c1_mean - c2_mean) / max(c1_mean, c2_mean) < 0.35:
+    #     score += scaled_scoring(aver_cluster_cv, max_cv, 20, 2)
+    # else:
+    #     score = 0
 
     # Score for: Amount of lines = 20/100
     # amount of lines [8,27] gets half by default, additional through parabolic scaling
