@@ -14,6 +14,17 @@ def put_lines(lines, image, color, thickness=2):
             cv2.line(image, points[0], points[1], color=color, thickness=thickness)
 
 
+def normalize_rho(lines):
+    for i, l in enumerate(lines):
+        rho, theta = l
+        if rho < 0:
+            rho *= -1
+            theta += np.pi
+            theta = theta % (2 * np.pi)
+            lines[i] = [rho, theta]
+    return lines
+
+
 def slope_from_theta(theta, max):
     """
     The max slope for the lines would be the height of the image
@@ -104,6 +115,11 @@ def orthogonal_gap(line1, line2):
 
 def sort_Rho(lines, eps):
     """
+    Old method of sorting groups of lines by static distance between each of them.
+    Works well with flatter lines like:
+    - top down perspectives
+    - on corner perspectives.
+
     Sort and groups lines by their rho (distance to the original, top left of images)
     Uses sliding window to get the best interval of similar gapped lines (gap is determined by rho)
     groups are merged by the difference of gap created by the next two lines

@@ -7,6 +7,7 @@ from ChessBoardDetector import CV_filter_groups as cvfg
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
 from ChessBoardDetector import Grid_Completion as gc
+from ChessBoardDetector import Vanishing_point as vp
 
 """
 constant = the value is used as is
@@ -97,10 +98,10 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=150):
     if corners is not None:
         lines = hcd.filter_hough_lines_by_corners(lines, corners)
     lines = fg.filter_similar_lines(lines, image_shape)
-    return lines
+    return ht.normalize_rho(lines)
 
 
-def cluster_lines(image, lines, cluster_eps, gap_eps):
+def cluster_lines(image, lines, gap_eps):
     """
 
     :param image:
@@ -110,15 +111,11 @@ def cluster_lines(image, lines, cluster_eps, gap_eps):
     """
     # 1st round clusters needs top find 8-10 lines that represents one of the row/col lines
     # clusters, leftovers, theta_labels = cvfg.kmeans_cluster_lines(lines, image.shape[:2])
-    clusters = cvfg.kmeans_cluster_lines(lines, image.shape[:2])
-    start_lines = []
-    for i, c in enumerate(clusters):
-        print(i, c)
-        temp = cvfg.has_vanishing_point(c, image.shape[:2])
-        if len(temp) > len(start_lines) and len(temp) < 12:
-            start_lines = temp
-        find_exact_line(image, temp, 0)
+    temp = vp.has_vanishing_point(lines, image.shape[:2])
 
+    for key in temp:
+        print(key, temp[key])
+        find_exact_line(image, temp[key], 0)
 
     # final_clusters = []
     # for c in clusters:
@@ -230,17 +227,15 @@ def find_exact_line(image, lines, index, corners=[]):
     ht.show_images(img)
 
 
-def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
+def detect_chessboard(image_name, thres_config, d_mode):
     """
 
     :param image_name:
     :param thres_config:
-    :param scalar_config:
     :return: An image with
     """
 
     ksize, edge_thres1, edge_thres2, hline_thres = thres_config
-    similar_houghline_eps, eps_scalar, cluster_eps, gap_eps = scalar_config
     image, origin_img, image_scale = image_load(image_name)
     if origin_img is None:
         origin_img = image
@@ -248,8 +243,7 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
 
     # Epsilon list (suggested by GPT and tested)
     image_diagonal = np.hypot(width, height)
-    cluster_eps = 0.1 * cluster_eps
-    gap_eps = 0.1 * gap_eps
+    gap_eps = 0.1
 
     corners = hcd.harris(image, ksize)
 
@@ -279,6 +273,11 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
                              corners,
                              mask,
                              3)
+    # copy_l = lines.copy()
+    # copy_l.sort(key=lambda x: x[1])
+    # for i in range(len(copy_l)):
+    #     print(i, ":", copy_l[i])
+    #     find_exact_line(image, copy_l, i)
     for x, y in corners:
         cv2.circle(image, (x, y), radius=3, color=(0, 255, 255), thickness=1)
     #
@@ -286,11 +285,10 @@ def detect_chessboard(image_name, thres_config, scalar_config, d_mode):
     # for x in range(len(lines)):
     #     print(lines[x])
     #     find_exact_line(image, lines, x)
-    find_exact_line(image, lines, 0)
 
     if len(lines) <= 4:
         return False
-    clusters = cluster_lines(image, lines, cluster_eps, gap_eps)
+    clusters = cluster_lines(image, lines, gap_eps)
 
     # for l in range(len(clusters)):
     #     print(clusters[l])
@@ -366,7 +364,7 @@ def main():
         #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
         #     print('done: ', i)
         for j in range(len(medium)):
-            detect_chessboard(medium[j], thres_config, scalar_config, i)
+            detect_chessboard(medium[j], thres_config, i)
         i += 1
 
 

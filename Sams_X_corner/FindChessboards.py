@@ -416,40 +416,46 @@ def getBoardOutline(best_lines_x, best_lines_y, M):
 
 
 
-def processSingle(filename='input/img_10.png'):
-  img = loadImage(filename)
-  M, ideal_grid, grid_next, grid_good, spts = findChessboard(img)
-  print(M)
+def processSingle(filename):
+    current_dir = Path(__file__).resolve().parent
+    parent_dir = current_dir.parent
+    filename = os.path.join(str(parent_dir), filename)
+    print(filename)
+    img = loadImage(filename)
+    M, ideal_grid, grid_next, grid_good, spts = findChessboard(img)
 
-  # View
-  if M is not None:
-      M, _ = generateNewBestFit((ideal_grid+8)*32, grid_next, grid_good) # generate mapping for warping image
-      print(M)
-      img_warp = cv2.warpPerspective(img, M, (17*32, 17*32), flags=cv2.WARP_INVERSE_MAP)
-      
-      best_lines_x, best_lines_y = getBestLines(img_warp)
-      xy_unwarp = getUnwarpedPoints(best_lines_x, best_lines_y, M)
+    # View
+    if M is not None:
+        M, _ = generateNewBestFit((ideal_grid+8)*32, grid_next, grid_good) # generate mapping for warping image
+        img_warp = cv2.warpPerspective(img, M, (17*32, 17*32), flags=cv2.WARP_INVERSE_MAP)
 
-      
-      plt.figure(figsize=(20,20))
-      plt.subplot(212)
-      imshow(img_warp, cmap='Greys_r')
-  #     plt.figure(figsize=(20,10))
-      [plt.axvline(line, color='red', lw=2) for line in best_lines_x];
-      [plt.axhline(line, color='green', lw=2) for line in best_lines_y];
-      
-      
-      plt.subplot(211)
-      axs = plt.axis()
-      imshow(img, cmap='Greys_r');
-      axs = plt.axis()
-      plt.plot(spts[:,1],spts[:,0],'o')
-      plt.plot(grid_next[:,0].A, grid_next[:,1].A,'rs')
-      plt.plot(grid_next[grid_good,0].A, grid_next[grid_good,1].A,'rs', markersize=12)
-      plt.plot(xy_unwarp[:,0], xy_unwarp[:,1], 'go', markersize=15)
-      plt.axis(axs)
-      plt.savefig('result_single.png', bbox_inches='tight')
-      plt.show()
+        best_lines_x, best_lines_y = getBestLines(img_warp)
+        xy_unwarp = getUnwarpedPoints(best_lines_x, best_lines_y, M)
+        board_outline_unwarp = getBoardOutline(best_lines_x, best_lines_y, M)
+
+
+        plt.figure(figsize=(20,20))
+        plt.subplot(212)
+        imshow(img_warp, cmap='Greys_r')
+        #     plt.figure(figsize=(20,10))
+        [plt.axvline(line, color='red', lw=2) for line in best_lines_x];
+        [plt.axhline(line, color='green', lw=2) for line in best_lines_y];
+
+
+        plt.subplot(211)
+        axs = plt.axis()
+        imshow(img, cmap='Greys_r');
+        axs = plt.axis()
+        plt.plot(spts[:,1],spts[:,0],'o')
+        plt.plot(grid_next[:,0].A, grid_next[:,1].A,'rs')
+        plt.plot(grid_next[grid_good,0].A, grid_next[grid_good,1].A,'rs', markersize=12)
+        plt.plot(xy_unwarp[:,0], xy_unwarp[:,1], 'go', markersize=15)
+        plt.axis(axs)
+        plt.savefig('result_single.png', bbox_inches='tight')
+        plt.show()
+
+        return xy_unwarp, board_outline_unwarp
+    return None, None
 
 def main():
     test1 = ["Taken_Photos/left,25angle.png",
@@ -465,9 +471,10 @@ def main():
              "Taken_Photos/left,rotated,65angle.png",
              "Taken_Photos/left,rotated,random,65angle.png"
              ]
+    test_single = ["Taken_Photos/left,25angle.png"]
     current_dir = Path(__file__).resolve().parent
     parent_dir = current_dir.parent
-    filenames = test1
+    filenames = test_single
     print("Files: %s" % filenames)
     fig = figure( figsize=(20, 20))
     n = len(filenames)
@@ -497,7 +504,7 @@ def main():
             print(xy_unwarp)
             # Chessboard borders
             board_outline_unwarp = getBoardOutline(best_lines_x, best_lines_y, M)
-
+            print(board_outline_unwarp)
             a=fig.add_subplot(int(row),int(col),i+1)
 
             axs = plt.axis()
@@ -520,8 +527,8 @@ def main():
             axis('off')
             print("    Fail")
 
-    plt.savefig('result.png', bbox_inches='tight')
-    plt.show()
+    # plt.savefig('result.png', bbox_inches='tight')
+    # plt.show()
 
 
 if __name__ == '__main__':

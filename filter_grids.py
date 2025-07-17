@@ -9,6 +9,29 @@ from scipy import ndimage
 from scipy.spatial import KDTree
 
 
+def snap_to_cardinal_diagonal(angle):
+    """
+    Snap an angle to the nearest cardinal or diagonal direction.
+    Claude generated
+    """
+    # Target angles: cardinal and diagonal directions
+    targets = [0, 45, 90, 135, 180, 225, 270, 315]
+
+    # Find the target with minimum distance
+    min_distance = float('inf')
+    closest_target = 0
+
+    for target in targets:
+        # Calculate distance considering circular nature of angles
+        distance = min(abs(angle - target), 360 - abs(angle - target))
+
+        if distance < min_distance:
+            min_distance = distance
+            closest_target = target
+
+    return closest_target
+
+
 def intersection_polar_lines(line1, line2, eps=1e-6):
     """
     Packed line = [[rho, theta]]
@@ -32,12 +55,30 @@ def intersection_polar_lines(line1, line2, eps=1e-6):
     # Check if determinant is close to zero → lines are parallel
     det = np.linalg.det(A)
 
+    # Claude generate in order to get direction of infinity as intersection of the two lines
+
+    # Lines are parallel - calculate direction of infinity
+    # Direction vector of the line is perpendicular to normal vector [a, b]
+    # So direction is [-b, a] (rotated 90 degrees)
+    direction = np.array([-b1, a1])  # Using first line's coefficients
+
+    # Convert direction to angle in image coordinates (origin at top-left)
+    # In image coordinates, positive y goes down, so we need to flip y
+    angle_rad = np.arctan2(direction[1], direction[0])
+
+    # Convert to degrees for easier interpretation
+    angle_deg = np.degrees(angle_rad)
+
+    # Normalize angle to [0, 360) range
+    if angle_deg < 0:
+        angle_deg += 360
+
     if abs(det) < eps:
-        return None  # No intersection (parallel lines)
+        return None, snap_to_cardinal_diagonal(angle_deg)
 
     # solves system of equations for both lines' ax+by=ρ equation
     x, y = np.linalg.solve(A, B)
-    return [round(x), round(y)]
+    return [round(x), round(y)], snap_to_cardinal_diagonal(angle_deg)
 
 
 def normalize_theta(theta):
