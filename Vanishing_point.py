@@ -2,6 +2,7 @@ import sys
 import cv2
 import math
 import numpy as np
+from collections import Counter
 from ChessBoardDetector import filter_grids as fg
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
@@ -37,7 +38,7 @@ def most_common_point(points, tolerance=15):
     :return:
     """
     if points is None or len(points) == 0:
-        return []
+        return None
 
     mask = []
     valid_points = []
@@ -56,6 +57,8 @@ def most_common_point(points, tolerance=15):
                 if points[i][j]:
                     valid_points.append(points[i][j])
                     mask.append(j)
+    if len(valid_points) == 0:
+        return None
     points_np = np.array(valid_points)  # Shape (N, 2)
 
     # Cluster with fixed radius (tolerance)
@@ -82,7 +85,14 @@ def most_common_point(points, tolerance=15):
 
     # Extract all points within each cluster
     indexes = [mask[i] for i, l in enumerate(db.labels_) if l == max_index]
-    return indexes
+
+    # Extract most dominant direction of VP
+    all_points = [points[i] for i in indexes]
+    directions = [direction for _, direction in all_points]
+    direction_counts = Counter(directions)
+    most_common_direction, count = direction_counts.most_common(1)[0]
+
+    return indexes, most_common_direction
 
 
 def get_all_intersections(lines, image_shape):
@@ -129,8 +139,8 @@ def get_all_intersections(lines, image_shape):
                             j += 1
                             continue
                     # Goes far outside the image, consider as inf VP
-                    if sect[0] > (3 * w) and sect[1] > (3 * h):
-                        vp_list[i].append(([], None))
+                    if abs(sect[0]) > (3 * w) or abs(sect[1]) > (3 * h):
+                        vp_list[i].append((None, direction))
                         j += 1
                         continue
                 vp_list[i].append((sect, direction))
@@ -141,15 +151,6 @@ def get_all_intersections(lines, image_shape):
     return vp_list
 
 
-def theta_variance(theta):
-    """
-    Apparently CV_filter_group's check_imbalance is too strict
-    This will allow some leniency when it comes to theta variance.
-    :param theta:
-    :return:
-    """
-
-
 def has_vanishing_point(lines, image_shape):
     """
     Checks vanishing points between lines, lines with NONE is usually a good sign
@@ -157,6 +158,8 @@ def has_vanishing_point(lines, image_shape):
 
     If amount of None >= 4, replace all lines with those lines instead
     If amount of None < 4, but points > 3x(h,w), count those as good VPs
+
+    Average operations: N^3
     :param lines:
     :param image_shape:
     :return:
@@ -167,8 +170,8 @@ def has_vanishing_point(lines, image_shape):
     center_w = [w * (1/4), w * (3/4)]
     center_h = [h * (1/4), h * (3/4)]
 
-    # for x in vp_list:
-    #     print(x)
+    for x in vp_list:
+        print(x)
 
     # If there are 4 or more VPs that are none or extremely outside the image
     # We can consider those lines good
@@ -182,38 +185,48 @@ def has_vanishing_point(lines, image_shape):
             continue
         good_vps_index = {}
         escape = False
+        """
+        This section is spilt into two sections:
+        1) Common vanishing point thats nears infinite (3 * dimensions of image)
+        2) Common intersection AREA
+        """
         for j, vp in enumerate(line_vp):
             sect, direction = vp
             if i == j:
-                for key in good_vps_index:
-                    good_vps_index[key].add(i)
                 continue
             # How an image works is, even negative is considered outside of image
             # Checks if the vanish point is outside 3 times the dimensions of the image
             if (sect is None or
-                    (len(sect) == 2 and abs(sect[0]) > (3 * w) and abs(sect[1]) > (3 * h))):
+               (len(sect) == 2 and abs(sect[0]) > (3 * w) and abs(sect[1]) > (3 * h))):
                 # Lines need to have same direction VPs to be accepted
                 # Lines can only form two VPs
                 good_vps_index.setdefault(direction, {j}).add(j)
+        # Add own line to all groups
+        for key in good_vps_index:
+            good_vps_index[key].add(i)
         # near parallel lines were found
+        # key is direction, value if indexes of lines that also also vps infinitely in that direction
         for key, value in good_vps_index.items():
             if len(value) >= min_needed:
                 escape = True
+                line_group = []
                 for index in value:
-                    good_lines.setdefault(i, []).append(lines[index])
+                    line_group.append(lines[index])
+                good_lines[i] = (line_group, key)
             if escape:
                 break
 
         # no parallel lines were found for current line
         # Multi-sharing VP lines needs to run
         if i not in good_lines:
-            results = most_common_point(vp_list[i], min(h,w)/15)
+            results, direction = most_common_point(vp_list[i], min(h,w)/10)
+            if results is None:
+                continue
             gotten_lines = [lines[index] for index in results]
-            used.add(index for index in results)
-            # No need to keep less then 4 lines
             if len(results) < 4 or len(results) > 10:
                 continue
+            used.add(index for index in results)
             for index in results:
-                good_lines[i] = gotten_lines
+                good_lines[i] = (gotten_lines, direction)
 
     return good_lines

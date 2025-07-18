@@ -3,9 +3,11 @@ import sys
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
 from scipy.spatial import KDTree
+from ChessBoardDetector import CV_filter_groups as cvfg
 
 
 def show_corners(image, points):
@@ -28,11 +30,12 @@ def cluster_duplicates(corner_points, eps):
     # GPT used to get DBSCAN syntax
     dbscan = DBSCAN(eps=eps, min_samples=1)
     labels = list(dbscan.fit_predict(corner_points))
-
     unique_corners = []
-    for label in labels:
-        # GPT generated
-        cluster_points = corner_points[labels == label]
+    for label in set(labels):
+        # Get all points belonging to this cluster
+        cluster_mask = np.array(labels) == label
+        cluster_points = corner_points[cluster_mask]
+        # Calculate mean and add to unique corners
         unique_corners.append(cluster_points.mean(axis=0).astype(int).tolist())
     return unique_corners
 
@@ -48,7 +51,7 @@ def harris(image, ksize):
     blurred = cv2.GaussianBlur(gray, (ksize, ksize), 1)
 
     # OpenCV’s cornerHarris internally computes gradients and matrix M
-    dst = cv2.cornerHarris(blurred, blockSize=2, ksize=3, k=0.04)
+    dst = cv2.cornerHarris(blurred, blockSize=2, ksize=3, k=0.03)
 
     # Dilate to find local maxima
     dst_dilated = cv2.dilate(dst, None)
@@ -57,7 +60,7 @@ def harris(image, ksize):
     local_max_mask = (dst == dst_dilated)
 
     # Threshold the Harris response (gives all local maxima where the response value > 1%)
-    threshold = 0.01 * dst.max()
+    threshold = 0.05 * dst.max()
     threshold_mask = (dst > threshold)
 
     # Combine masks: points that are local maxima AND above threshold
@@ -92,37 +95,30 @@ def hough_line_intersect(line, point, tolerance=1):
 
 def consistent_gaps(points, get_variance=False):
     """
-    CV Scoring:
-    consistent spacing  	< 0.07
-    somewhat structured	        0.10–0.15
-    Noisy / outlier	        > 0.20
-
-    Uses 0.15 during to 3d aspect we cannot control with images
-    :param points: list of [x,y], length must be >= 4
+    Uses MAD to find median gap, and if majority of the points
+    :param points: collection of (x,y)/[x,y], length must be >= 4
     :param get_variance: Gets the variance of the points given instead of a boolean
     :return:
     """
     gaps = []
-    eps = 0.4
+    points_copy = np.array([[x, y] for x, y in points])
+    """
+        Gets distance to the nearest point instead
+        Slots n neighbors closest to each point, needs to be 2 or it'll use itself
+        Distance is the dist to the neighboring points
+        Indices represent the point index in the list
+    """
+    neighbors = NearestNeighbors(n_neighbors=2).fit(points_copy)
+    distances, indices = neighbors.kneighbors(points_copy)
+    # Take the distance to the nearest *other* point (exclude self at index 0)
+    nearest_dists = distances[:, 1]
 
-    points_copy = points.copy()
-    points_copy.sort(key=lambda x: x[0])
-    for i in range(len(points_copy) - 1):
-        a, b = np.array(points_copy[i]), np.array(points_copy[i + 1])
-        dist = float(np.linalg.norm(a - b))
-        if dist > 0.0001:
-            gaps.append(dist)
-    # get variance instead of consistency evaluation
-    mean = np.mean(gaps)
-    cv = sys.maxsize
-    if mean > 0.0001:
-        cv = np.std(gaps) / mean
-    if get_variance:
-        return cv
-    # There arent enough points, or some points are too close to each other
-    if len(gaps) < 3:
+    # Finds mad and makes sure every distance is within it
+    outliers = cvfg.check_MAD(nearest_dists, 1.5)
+    if abs(len(points) - len(outliers)) < 4:
         return False
-    return cv < eps
+
+    return True
 
 
 def filter_hough_lines_by_corners(lines, corners, min_hits=3):
@@ -136,16 +132,16 @@ def filter_hough_lines_by_corners(lines, corners, min_hits=3):
     """
     filtered_lines = []
     for l in lines:
-        hits = []
+        hits = set()
         for point in corners:
             if hough_line_intersect(l, point):
-                hits.append(point)
+                hits.add(tuple(point))
         if len(hits) == 0:
             continue
-        # Attempts to get lines with consistent gaps as priority
         # Rest of intersected points are appended to 2nd list
         if len(hits) >= min_hits:
-            filtered_lines.append(l)
+            if consistent_gaps(hits):
+                filtered_lines.append(l)
     return filtered_lines
 
 

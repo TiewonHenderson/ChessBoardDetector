@@ -471,10 +471,9 @@ def main():
              "Taken_Photos/left,rotated,65angle.png",
              "Taken_Photos/left,rotated,random,65angle.png"
              ]
-    test_single = ["Taken_Photos/left,25angle.png"]
     current_dir = Path(__file__).resolve().parent
     parent_dir = current_dir.parent
-    filenames = test_single
+    filenames = test1
     print("Files: %s" % filenames)
     fig = figure( figsize=(20, 20))
     n = len(filenames)
@@ -527,8 +526,8 @@ def main():
             axis('off')
             print("    Fail")
 
-    # plt.savefig('result.png', bbox_inches='tight')
-    # plt.show()
+    plt.savefig('result.png', bbox_inches='tight')
+    plt.show()
 
 
 if __name__ == '__main__':

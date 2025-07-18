@@ -9,10 +9,10 @@ from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
 
 
-def cv_sort_rho(lines, defined_gap, image_shape):
+def cv_filter_sort_lines(lines, image_shape):
     """
-    Sort and groups lines by their rho (distance to the original, top left of images)
-    Uses coefficient variance in order to get gap consistency
+    Given a group of lines, use a vertical and horizontal line through the middle of the image
+    in order to gauge the intersection gaps.
 
     This also uses vanishing point concept.
     The group of lines must intersect at one point which is the vanishing point.
@@ -29,55 +29,29 @@ def cv_sort_rho(lines, defined_gap, image_shape):
             with a 1D array representing gap average of each group of lines
     """
     # Not enough lines to be considered a grid
-    if len(lines) <= 4:
+    if len(lines) < 4:
         return [lines], []
-    rhos = [fg.normalize_line(line)[0] for line in lines]
-    rhos.sort()
-    min_gap = 0.0264 * min(W, H)
+    h, w = image_shape
+    min_gap = 0.0264 * min(h, w)
 
-    # Gives rho difference as:
-    # [x1-x0, x2-x1, ..., x(n-1) - x(n-2)]
-    gaps = np.diff(rho)
-    # [gap1/gap0, gap2/gap1, ..., gap(n-1)/gap(n-2)]
-    ratios = gaps[1:] / gaps[:-1]
+    h_line = [h/2, np.pi]
+    v_line = [w/2, 0]
+
+    
 
 
-def check_imbalance(elements, new_element=None):
+def check_MAD(elements, std_dev=3.5):
     """
-    Usees a combination of Coefficient of Variation (CV)
-    and
-    Median Absolute Deviation (MAD)
-    To calculate if the new_gap is an outlier and shouldnt be kept
-
-    CV is powerful in order to spike in value when variance happens, i.e outlier(s)
-    However falls short if the outlier is still close within the gap values
-
-    MAD will be able to confirm CV passing the new_gap as low variance
-    MAD reference:
-    https://www.statology.org/modified-z-score/
-
-    Summary (Good explaination from GPT):
-    CV gives you group-level insight — "Are the gaps consistent overall?"
-    MAD gives you point-level robustness — "Is this new gap too far from the typical ones?"
-
-    mad can only be 0 when:
-    [45, 55, 55, 55, 999]
-    [10, 0, 0, 0, 944]
-    :param gaps:
-    :param new_gap:
-    :return: if new_element is a new element:
-             0 = Not part of the gap group
-             1 = Is a near multiple of the gap, could be useful for line interpolation
-             2 = Is part of the line group
-             if new_element is none:
-             0 = has outliers
-             1 = consistent throughout
+        Median Absolute Deviation (MAD)
+        To calculate if the new_gap is an outlier and shouldnt be kept
+        MAD reference:
+        https://www.statology.org/modified-z-score/
+    :param elements:
+    :return:
     """
     if len(elements) < 3:
         return 0
     elem_copy = np.array(elements)
-    if new_element is not None:
-        elem_copy = np.append(elem_copy, new_element)
     # 2 or less lines cannot form > 1 gap
     # Find MAD, we can treat it like a general standard deviation
     median = np.median(elem_copy)
@@ -88,15 +62,55 @@ def check_imbalance(elements, new_element=None):
         # mad being 0 means more then half of the gaps are the same
         mad = np.median(np.unique(dist_med))
         if mad == 0:
-            # mad still being 0 means all gaps are equal
-            # Need to calculate CV to confirm "new_gap"
-            mad = None
-
-    if mad is not None and mad != 0 and new_element is not None:
-        mod_z_score = 0.6745 * (new_element - median) / mad
+            return []
+    outliers = []
+    for i, x in enumerate(elements):
+        mod_z_score = 0.6745 * (x - median) / mad
         # Apparantly 3.5 std dev is a good indication of outlier
-        if mod_z_score > 3.5:
-            return 0
+        if mod_z_score > std_dev:
+            outliers.append(i)
+
+    return outliers
+
+
+
+def check_imbalance(elements, new_element=None):
+    """
+        Usees a combination of Coefficient of Variation (CV)
+        and
+        Median Absolute Deviation (MAD)
+        To calculate if the new_gap is an outlier and shouldnt be kept
+
+        CV is powerful in order to spike in value when variance happens, i.e outlier(s)
+        However falls short if the outlier is still close within the gap values
+
+        MAD will be able to confirm CV passing the new_gap as low variance
+        MAD reference:
+        https://www.statology.org/modified-z-score/
+
+        Summary (Good explaination from GPT):
+        CV gives you group-level insight — "Are the gaps consistent overall?"
+        MAD gives you point-level robustness — "Is this new gap too far from the typical ones?"
+
+        mad can only be 0 when:
+        [45, 55, 55, 55, 999]
+        [10, 0, 0, 0, 944]
+    :param elements: A 1D array of numerical value
+    :param new_element: A new value representing the same values in elements
+    :return: if new_element is a new element:
+             0 = Not part of the gap group
+             1 = Is a near multiple of the gap, could be useful for line interpolation
+             2 = Is part of the line group
+             if new_element is none:
+             0 = has outliers
+             1 = consistent throughout
+    """
+    if len(elements) < 3:
+        return 0
+    elem_copy = np.append(elements, new_element)
+    outliers = check_MAD(elem_copy)
+    if len(outliers):
+        return 0
 
     # MAD passes, check CV
     std_dev = np.std(elem_copy)
@@ -111,7 +125,7 @@ def check_imbalance(elements, new_element=None):
         return 2
     elif new_element is not None:
         # check if gap is a multiple of mean
-        ratio = new_gap/mean
+        ratio = new_element/mean
         scale = round(ratio)
         # Only allow 1-2 lines to be interpolated
         if 2 <= scale <= 4 and abs(scale - ratio) < 0.2:

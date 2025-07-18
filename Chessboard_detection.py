@@ -81,7 +81,7 @@ def rescale_all(scale_factor, lines=[], corners=[]):
     return rescaled_lines, rescaled_corners
 
 
-def houghLine_detect(image_shape, edges, corners, mask=None, threshold=150):
+def houghLine_detect(image_shape, edges, corners, mask=None, threshold=4):
     """
     :param image_shape: [height, width] of the image
     :param edges: All the edges found from canny edge detection
@@ -94,7 +94,7 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=150):
     if mask is not None:
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
-    lines = ht.unpack_hough(cv2.HoughLines(e, 1, np.pi / 180, threshold=threshold))
+    lines = ht.unpack_hough(cv2.HoughLines(e, 1, np.pi / 720, threshold=threshold))
     if corners is not None:
         lines = hcd.filter_hough_lines_by_corners(lines, corners)
     lines = fg.filter_similar_lines(lines, image_shape)
@@ -103,19 +103,20 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=150):
 
 def cluster_lines(image, lines, gap_eps):
     """
+    Clustering and filtering groups by their shared vanishing point
 
     :param image:
     :param lines:
     :param gap_eps:
     :return:
     """
-    # 1st round clusters needs top find 8-10 lines that represents one of the row/col lines
-    # clusters, leftovers, theta_labels = cvfg.kmeans_cluster_lines(lines, image.shape[:2])
+    # Clusters by shared vanishing point
     temp = vp.has_vanishing_point(lines, image.shape[:2])
 
     for key in temp:
-        print(key, temp[key])
-        find_exact_line(image, temp[key], 0)
+        lines, direction = temp[key]
+        print(key, direction, temp[key])
+        find_exact_line(image, lines, 0)
 
     # final_clusters = []
     # for c in clusters:
@@ -246,7 +247,7 @@ def detect_chessboard(image_name, thres_config, d_mode):
     gap_eps = 0.1
 
     corners = hcd.harris(image, ksize)
-
+    print(corners)
     # GPT generate to make corner binary map
     binary_map = np.zeros((height, width), dtype=np.uint8)
     for x, y in corners:
@@ -273,14 +274,11 @@ def detect_chessboard(image_name, thres_config, d_mode):
                              corners,
                              mask,
                              3)
-    # copy_l = lines.copy()
-    # copy_l.sort(key=lambda x: x[1])
-    # for i in range(len(copy_l)):
-    #     print(i, ":", copy_l[i])
-    #     find_exact_line(image, copy_l, i)
+
+    find_exact_line(image, lines, 0, corners=corners)
     for x, y in corners:
         cv2.circle(image, (x, y), radius=3, color=(0, 255, 255), thickness=1)
-    #
+
     # lines.sort(key=lambda x: x[1])
     # for x in range(len(lines)):
     #     print(lines[x])
@@ -356,15 +354,14 @@ def main():
     i = 1
     while not detected:
         thres_config = (ksize, edge_thres1, edge_thres2, hline_thres)
-        scalar_config = (similar_hline_eps, eps_scalar, cluster_eps, gap_eps)
         # for j in range(len(easy)):
         #     detected = detect_chessboard(easy[j], thres_config, scalar_config, i)
         #     print('done: ', i)
         # for j in range(len(medium)):
         #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
         #     print('done: ', i)
-        for j in range(len(medium)):
-            detect_chessboard(medium[j], thres_config, i)
+        for j in range(len(test1)):
+            detect_chessboard(test1[3], thres_config, i)
         i += 1
 
 
