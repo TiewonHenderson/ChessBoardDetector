@@ -335,6 +335,7 @@ def loadImage(filepath):
     
     return img
 
+
 def findChessboard(img, min_pts_needed=15, max_pts_needed=25):
     blur_img = cv2.blur(img, (3,3)) # Blur it
     saddle = getSaddle(blur_img)
@@ -394,6 +395,7 @@ def findChessboard(img, min_pts_needed=15, max_pts_needed=25):
     else:
         return None, None, None, None, None
 
+
 def getUnwarpedPoints(best_lines_x, best_lines_y, M):
     x,y = np.meshgrid(best_lines_x, best_lines_y)
     xy = np.vstack([x.flatten(), y.flatten()]).T.astype(np.float32)
@@ -401,6 +403,7 @@ def getUnwarpedPoints(best_lines_x, best_lines_y, M):
 
     xy_unwarp = cv2.perspectiveTransform(xy, M)
     return xy_unwarp[0,:,:]
+
 
 def getBoardOutline(best_lines_x, best_lines_y, M):
     d = best_lines_x[1] - best_lines_x[0]
@@ -485,22 +488,16 @@ def processSingle(filename):
     return None, None
 
 def main():
-    test1 = ["Taken_Photos/left,25angle.png",
-             "Taken_Photos/left,random,25angle.png",
-             "Taken_Photos/top,random,rotated.png",
-             "Taken_Photos/top,random.png",
-             "Taken_Photos/top,rotated.png",
-             "Taken_Photos/top.png",
-             "Taken_Photos/left,65angle.png",
-             "Taken_Photos/left,random,45angle.png",
-             "Taken_Photos/left,rotated,45angle.png",
-             "Taken_Photos/left,rotated,random,45angle.png",
-             "Taken_Photos/left,rotated,65angle.png",
-             "Taken_Photos/left,rotated,random,65angle.png"
-             ]
+    hard = ["Taken_Photos/left,rotated,65angle.png",
+            "Taken_Photos/left,rotated,random,65angle.png",
+            "Real_Photos/Far,angled,solid.jpg",
+            "Real_Photos/1-5.png",
+            "Real_Photos/Far,somewhat_angled,flat.jpg",
+            "Real_Photos/Mid,somewhat_angled,flat2.jpg",
+            "Real_Photos/Mid,very_angled,solid.jpg"]
     current_dir = Path(__file__).resolve().parent
     parent_dir = current_dir.parent
-    filenames = test1
+    filenames = hard
     print("Files: %s" % filenames)
     fig = figure( figsize=(20, 20))
     n = len(filenames)
@@ -512,11 +509,13 @@ def main():
     if (n%col != 0):
       row += 1
 
+    xy_unwarp, board_outline_unwarp = processSingle("Taken_Photos/left,random,25angle.png")
+    print(board_outline_unwarp)
+
     for i in range(n):
         filename = os.path.join(str(parent_dir), filenames[i])
         print ("Processing %d/%d : %s" % (i+1,n,filename))
 
-        img = loadImage(filename)
         M, ideal_grid, grid_next, grid_good, spts = findChessboard(img)
 
         # View

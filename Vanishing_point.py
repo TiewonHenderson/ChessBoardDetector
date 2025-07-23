@@ -34,11 +34,12 @@ def most_common_point(points, tolerance=15):
     """
     GPT suggested using cluster to find most common point
     :param points: Expects 3D
-    :param tolerance:
-    :return:
+    :param tolerance: Area of pixel toleration (how much offset area to be considered a shared VP)
+    :return: Gets a list of indices for most common intersection points (vanishing points) and the angle direction
+             is represented as a unit circle (0 degree is left, 90 degree is vertical top)
     """
     if points is None or len(points) == 0:
-        return None
+        return None, None
 
     mask = []
     valid_points = []
@@ -58,7 +59,7 @@ def most_common_point(points, tolerance=15):
                     valid_points.append(points[i][j])
                     mask.append(j)
     if len(valid_points) == 0:
-        return None
+        return None, None
     points_np = np.array(valid_points)  # Shape (N, 2)
 
     # Cluster with fixed radius (tolerance)
@@ -130,7 +131,8 @@ def get_all_intersections(lines, image_shape):
             if i != j:
                 #intersection
                 sect, direction = fg.intersection_polar_lines(lines[i],
-                                                              lines[j])
+                                                              lines[j],
+                                                              need_dir=True)
                 if sect is not None:
                     # If vp is within the center, that makes no sense, don't append that
                     if center_w[0] < sect[0] < center_w[1]:
@@ -149,6 +151,56 @@ def get_all_intersections(lines, image_shape):
             j += 1
         i += 1
     return vp_list
+
+
+def finalize_groups(group_dict, lines):
+    """
+    Used after has_vanishing_point is run, as it outputs a lot of duplicate and similar groups
+    This function will combine/remove duplicates
+    :param group_dict: A dictionary of key: line indices, value = (lines, direction)
+    :param lines: The original list of lines
+    :return: A list of tuples (lines, direction), maybe add average gap but not sure
+    """
+
+    def check_similarity(g1, g2, dir1, dir2):
+        """
+        Checks two groups for intersecting values (intersection of lists)
+        :param g1: Group 1 of lines (1d collection of elements, prefer int)
+        :param g2: Group 2 of lines
+        :param dir1: Direction of VP for g1 (int)
+        :param dir2: Direction of VP for g2 (int)
+        :return: True, False to combine the groups
+        """
+        if dir1 != dir2:
+            return False
+        intersection = np.intersect1d(np.array(g1), np.array(g2))
+        # True if (one group is completely in another) or
+        # The groups overlap over 1/2 of elements
+        return len(intersection) >= min(len(g1), len(g2)) or len(intersection) >= max(len(g1), len(g2))/2
+
+    # Removes absolute duplicates by set collections
+    unique_values = list(set((tuple(list), dir) for list, dir in group_dict.values()))
+
+    # Need of combining groups with majority shared lines
+    i = 0
+    while i < len(unique_values):
+        g1, dir1 = unique_values[i]
+        j = i + 1
+        while j < len(unique_values):
+            g2, dir2 = unique_values[j]
+            # Combines and removes the i+1 index element without incrementing i
+            if check_similarity(g1, g2, dir1, dir2):
+                combined = g1 + g2
+                unique_values[i] = (tuple(set(combined)), dir1)
+                # Update the old group
+                g1, dir1 = unique_values[i]
+                unique_values.pop(j)
+                continue
+            j += 1
+        unique_values[i] = (list(set(g1)), dir1)
+        i += 1
+
+    return unique_values
 
 
 def has_vanishing_point(lines, image_shape):
@@ -170,8 +222,8 @@ def has_vanishing_point(lines, image_shape):
     center_w = [w * (1/4), w * (3/4)]
     center_h = [h * (1/4), h * (3/4)]
 
-    for x in vp_list:
-        print(x)
+    # for x in vp_list:
+    #     print(x)
 
     # If there are 4 or more VPs that are none or extremely outside the image
     # We can consider those lines good
@@ -211,7 +263,7 @@ def has_vanishing_point(lines, image_shape):
                 escape = True
                 line_group = []
                 for index in value:
-                    line_group.append(lines[index])
+                    line_group.append(index)
                 good_lines[i] = (line_group, key)
             if escape:
                 break
@@ -222,11 +274,30 @@ def has_vanishing_point(lines, image_shape):
             results, direction = most_common_point(vp_list[i], min(h,w)/10)
             if results is None:
                 continue
-            gotten_lines = [lines[index] for index in results]
-            if len(results) < 4 or len(results) > 10:
+            if len(results) < 3 or len(results) > 10:
                 continue
             used.add(index for index in results)
             for index in results:
-                good_lines[i] = (gotten_lines, direction)
+                good_lines[i] = (results, direction)
 
-    return good_lines
+    return finalize_groups(good_lines, lines)
+
+
+def enough_similar_theta(group):
+    """
+    Static check for easy parallel check, accept in same theta
+    :param group: 2D list of rho, theta lines
+    :return: Edits group by reference, returns same object being passed through
+    """
+    buckets = cvfg.bucket_sort([l[1] for l in group])
+    most_theta = max(buckets, key=lambda k: buckets[k])
+    if buckets[most_theta] >= len(group):
+        # If there is a dominant theta, remove all other thetas
+        i = 0
+        while i < len(group):
+            if abs(group[i][1] - most_theta) > 0.04:
+                group.pop(i)
+                continue
+            i += 1
+    return group
+

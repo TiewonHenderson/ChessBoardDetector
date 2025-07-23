@@ -51,7 +51,7 @@ def harris(image, ksize):
     blurred = cv2.GaussianBlur(gray, (ksize, ksize), 1)
 
     # OpenCV’s cornerHarris internally computes gradients and matrix M
-    dst = cv2.cornerHarris(blurred, blockSize=2, ksize=3, k=0.03)
+    dst = cv2.cornerHarris(blurred, blockSize=2, ksize=3, k=0.04)
 
     # Dilate to find local maxima
     dst_dilated = cv2.dilate(dst, None)
@@ -59,7 +59,7 @@ def harris(image, ksize):
     # Create mask of local maxima
     local_max_mask = (dst == dst_dilated)
 
-    # Threshold the Harris response (gives all local maxima where the response value > 1%)
+    # Threshold the Harris response (gives all local maxima where the response value > 5%)
     threshold = 0.05 * dst.max()
     threshold_mask = (dst > threshold)
 
@@ -123,7 +123,6 @@ def consistent_gaps(points, get_variance=False):
 
 def filter_hough_lines_by_corners(lines, corners, min_hits=3):
     """
-
     :param lines:
     :param corners:
     :param tolerance: Represented by total pixels off to be considered intersecting a corner
@@ -136,8 +135,6 @@ def filter_hough_lines_by_corners(lines, corners, min_hits=3):
         for point in corners:
             if hough_line_intersect(l, point):
                 hits.add(tuple(point))
-        if len(hits) == 0:
-            continue
         # Rest of intersected points are appended to 2nd list
         if len(hits) >= min_hits:
             if consistent_gaps(hits):

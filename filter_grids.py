@@ -32,11 +32,12 @@ def snap_to_cardinal_diagonal(angle):
     return closest_target
 
 
-def intersection_polar_lines(line1, line2, eps=1e-6):
+def intersection_polar_lines(line1, line2, need_dir=False, eps=1e-6):
     """
     Packed line = [[rho, theta]]
     :param line1: A packed line from hough line transformation
     :param line2: Different packed line from hough line transformation
+    :param need_dir: In case of a parallel line, this function can give the direction of parallel lines
     :param eps: epsilon threhold to determine if there is a valid intersection
     :return:
     """
@@ -57,10 +58,10 @@ def intersection_polar_lines(line1, line2, eps=1e-6):
 
     # Claude generate in order to get direction of infinity as intersection of the two lines
 
-    # Lines are parallel - calculate direction of infinity
+    # Assume Lines are parallel - calculate direction of infinity
     # Direction vector of the line is perpendicular to normal vector [a, b]
-    # So direction is [-b, a] (rotated 90 degrees)
-    direction = np.array([-b1, a1])  # Using first line's coefficients
+    # So direction is [b, a] (rotated 90 degrees)
+    direction = np.array([-a1, -b1])  # Using first line's coefficients
 
     # Convert direction to angle in image coordinates (origin at top-left)
     # In image coordinates, positive y goes down, so we need to flip y
@@ -74,11 +75,16 @@ def intersection_polar_lines(line1, line2, eps=1e-6):
         angle_deg += 360
 
     if abs(det) < eps:
-        return None, snap_to_cardinal_diagonal(angle_deg)
+        if need_dir:
+            return None, snap_to_cardinal_diagonal(angle_deg)
+        else:
+            return None
 
     # solves system of equations for both lines' ax+by=ρ equation
     x, y = np.linalg.solve(A, B)
-    return [round(x), round(y)], snap_to_cardinal_diagonal(angle_deg)
+    if need_dir:
+        return [round(x), round(y)], snap_to_cardinal_diagonal(angle_deg)
+    return [round(x), round(y)]
 
 
 def normalize_theta(theta):

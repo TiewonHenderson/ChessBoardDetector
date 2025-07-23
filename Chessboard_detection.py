@@ -81,7 +81,7 @@ def rescale_all(scale_factor, lines=[], corners=[]):
     return rescaled_lines, rescaled_corners
 
 
-def houghLine_detect(image_shape, edges, corners, mask=None, threshold=4):
+def houghLine_detect(image_shape, edges, corners, image, mask=None, threshold=4):
     """
     :param image_shape: [height, width] of the image
     :param edges: All the edges found from canny edge detection
@@ -95,6 +95,9 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=4):
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
     lines = ht.unpack_hough(cv2.HoughLines(e, 1, np.pi / 720, threshold=threshold))
+
+    find_exact_line(image, lines, 0, corners=corners, green=False)
+
     if corners is not None:
         lines = hcd.filter_hough_lines_by_corners(lines, corners)
     lines = fg.filter_similar_lines(lines, image_shape)
@@ -113,20 +116,28 @@ def cluster_lines(image, lines, gap_eps):
     # Clusters by shared vanishing point
     temp = vp.has_vanishing_point(lines, image.shape[:2])
 
-    for key in temp:
-        lines, direction = temp[key]
-        print(key, direction, temp[key])
-        find_exact_line(image, lines, 0)
+    # for group in temp:
+    #     indices, dir = group
+    #     got_lines = [lines[i] for i in indices]
+    #     print(group)
+    #     find_exact_line(image, got_lines, 0)
 
-    # final_clusters = []
-    # for c in clusters:
+    final_clusters = []
+    for group in temp:
+        indices, dir = group
+        got_lines = [lines[i] for i in indices]
+        got_lines.sort(key= lambda x:x[0])
+        got_lines = vp.enough_similar_theta(got_lines)
+        clean_lines, gap_avg = cvfg.cv_clean_lines(got_lines, dir, image.shape[:2], image)
+
+        if clean_lines is not None:
+            find_exact_line(image, clean_lines, 0, green=False)
+
+        final_clusters.append(clean_lines)
+    return final_clusters
+    #
     #     """
-    #     Sorts each cluster by rho value, then linearly scans to group each line by consistent gaps
-    #
-    #     gap_Interpolation returns potentially combined intervals if gaps are consistent or multiples of
-    #     each other (possibly indicating missing grid lines)
-    #
-    #     saves the largest found group of parallel lines with consistent gaps
+    #     Uses intersection by an external perpendicular line in order to gauge gap consistency
     #     """
     #
     #     sorted_list, gap_average = ht.sort_Rho(c, gap_eps)
@@ -211,18 +222,32 @@ def present_lines(image, clusters, scores, corners):
         ht.show_images(image)
 
 
-def find_exact_line(image, lines, index, corners=[]):
+def find_exact_line(image, lines, index, corners=[], green=True):
+    """
+    Function mainly to show each line value, not used for implementation
 
-    if len(lines) == 0:
-        print("NO LINES")
-        return
+    :param image:
+    :param lines:
+    :param index:
+    :param corners:
+    :param green: Make the line at index green if true
+    :return:
+    """
     img = image.copy()
-    l_copy = lines.copy()
-    line_x = [l_copy[index]]
-    l_copy.pop(index)
-    ht.put_lines(l_copy, img, (0, 0, 255))
-    ht.put_lines(line_x, img, (0, 255, 0))
     blue = (255, 0, 0)
+    if len(lines) == 0:
+        for x, y in corners:
+            cv2.circle(img, (int(x), int(y)), 3, color=blue, thickness=-1)
+        ht.show_images(img)
+        return
+    l_copy = lines.copy()
+    if green:
+        line_x = [l_copy[index]]
+        l_copy.pop(index)
+        ht.put_lines(l_copy, img, (0, 0, 255))
+        ht.put_lines(line_x, img, (0, 255, 0))
+    else:
+        ht.put_lines(l_copy, img, (0, 0, 255))
     for x, y in corners:
         cv2.circle(img, (int(x), int(y)), 3, color=blue, thickness=-1)
     ht.show_images(img)
@@ -247,7 +272,7 @@ def detect_chessboard(image_name, thres_config, d_mode):
     gap_eps = 0.1
 
     corners = hcd.harris(image, ksize)
-    print(corners)
+    find_exact_line(image, [], None, corners, False)
     # GPT generate to make corner binary map
     binary_map = np.zeros((height, width), dtype=np.uint8)
     for x, y in corners:
@@ -268,14 +293,17 @@ def detect_chessboard(image_name, thres_config, d_mode):
         255,
         thickness=-1
     )
-    print("Doing lines")
     lines = houghLine_detect([height, width],
                              binary_map,
                              corners,
+                             image,
                              mask,
                              3)
+    # Rounds up due to having extremely long decimals
+    lines = [[round(rho, 3), round(theta, 5)] for rho, theta in lines]
 
-    find_exact_line(image, lines, 0, corners=corners)
+    find_exact_line(image, lines, 0, corners=corners, green=False)
+    print("Finding lines")
     for x, y in corners:
         cv2.circle(image, (x, y), radius=3, color=(0, 255, 255), thickness=1)
 
@@ -360,8 +388,8 @@ def main():
         # for j in range(len(medium)):
         #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
         #     print('done: ', i)
-        for j in range(len(test1)):
-            detect_chessboard(test1[3], thres_config, i)
+        for j in range(len(medium)):
+            detect_chessboard(medium[3], thres_config, i)
         i += 1
 
 
