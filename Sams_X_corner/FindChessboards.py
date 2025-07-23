@@ -414,6 +414,33 @@ def getBoardOutline(best_lines_x, best_lines_y, M):
     xy_unwarp = cv2.perspectiveTransform(xy, M)
     return xy_unwarp[0,:,:]
 
+def processSingleCustomWrapper(filename):
+    print(filename)
+    img = loadImage(filename)
+
+    img_orig = Image.open(filename)
+    img_width, img_height = img_orig.size
+    aspect_ratio = min(500.0/img_width, 500.0/img_height)
+
+
+    M, ideal_grid, grid_next, grid_good, spts = findChessboard(img)
+
+    # View
+    if M is not None:
+        M, _ = generateNewBestFit((ideal_grid+8)*32, grid_next, grid_good) # generate mapping for warping image
+        img_warp = cv2.warpPerspective(img, M, (17*32, 17*32), flags=cv2.WARP_INVERSE_MAP)
+
+        best_lines_x, best_lines_y = getBestLines(img_warp)
+        xy_unwarp = getUnwarpedPoints(best_lines_x, best_lines_y, M)
+        board_outline_unwarp = getBoardOutline(best_lines_x, best_lines_y, M)[:4]
+
+        img_center_x = img_width / 2
+        for p in board_outline_unwarp:
+            p[0] /= aspect_ratio
+            p[1] /= aspect_ratio
+            # p[0] = 2 * img_center_x - p[0]  # Mirror across x axis (horizontal axis at image center)
+        return board_outline_unwarp
+    return None
 
 
 def processSingle(filename):
