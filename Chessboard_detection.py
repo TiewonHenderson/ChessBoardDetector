@@ -18,25 +18,19 @@ setting params are formatted as such:
 1) edge_threshold1   [constant]   (Min threshold for edge to be a candidate)
 2) edge_threshold2   [constant]   (threshold for automatic edge detection)
 3) hline_thres       [constant]   (votes to accept a line)
-4) similar_hline_eps [multiplier] (A epsilon treated as a threshold for difference in
-rho, theta to still be accepted as similar hough lines)
-5) eps_scalar        [multiplier] for filtering lines by:
-intersection with corners (how off they can be)
-clustering lines by consistent gaps (how off the gaps can be to be merged))
-6) cluster_eps       [multiplier] for clustering lines together by theta
-Either DBSCAN cluster (determines how close the theta values are to be merged)
-Or KMEANs (this eps doesn't affect it)
-7) gap_eps           [multiplier] for scaled epsilon between gaps, if the gap difference
-is below the eps, it gets accepted within a line group
+4) dir_eps
 """
 ksize = 7
 edge_thres1 = 100
 edge_thres2 = 150
 hline_thres = 100
-similar_hline_eps = 1
-eps_scalar = 0.55
-cluster_eps = 0.5
-gap_eps = 0.85
+
+dir_eps = {0: 0.2,
+           45: 0.15,
+           135: 0.15,
+           180: 0.2,
+           225: 0.15,
+           315: 0.15}
 
 
 def image_load(image_name):
@@ -95,7 +89,7 @@ def houghLine_detect(image_shape, edges, corners, image, mask=None, threshold=4)
     if mask is not None:
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
-    lines = ht.unpack_hough(cv2.HoughLines(e, 1, np.pi / 360, threshold=threshold))
+    lines = ht.unpack_hough(cv2.HoughLines(e, 1, 0.01, threshold=threshold))
     # lines = [[abs(rho), theta] for rho, theta in lines]
     if corners is not None:
         lines = hcd.filter_hough_lines_by_corners(lines, corners)
@@ -114,7 +108,6 @@ def cluster_lines(image, lines, gap_eps):
     """
     # Clusters by shared vanishing point
     temp = vp.has_vanishing_point(lines, image.shape[:2])
-
     # for group in temp:
     #     indices, dir = group
     #     got_lines = [lines[i] for i in indices]
@@ -130,31 +123,31 @@ def cluster_lines(image, lines, gap_eps):
         print("dir", dir)
         print("before", got_lines)
         find_exact_line(image, got_lines, 0, green=False)
-        if dir == 0 or dir == 180:
-            """
-            Circular clustering is treated differently
-            BUT since we know all the lines share the vp on top / bottom 
-            (Bottom doesn't really make sense camera wised, we'll focus)
-            We really only care about theta around [0, pi/4] and [3pi/4, pi]
-            """
-            copied_lines = [[rho, theta + np.pi/2] for rho, theta in got_lines]
-            clusters = fg.dbscan_cluster_lines(copied_lines, indices=True, eps=0.2).values()
-            if len(clusters) == 0:
-                continue
-            copied_lines = max(clusters, key=len)
-            got_lines = [got_lines[i] for i in copied_lines]
-        else:
-            clusters = fg.dbscan_cluster_lines(got_lines).values()
-            if len(clusters) == 0:
-                continue
-            got_lines = max(fg.dbscan_cluster_lines(got_lines).values(), key=len)
-        clean_lines, gap_avg = cvfg.cv_clean_lines(got_lines, dir, image.shape[:2], image)
-
-        if clean_lines is not None:
-            print("after", clean_lines)
-            find_exact_line(image, clean_lines, 0, green=False)
-
-        final_clusters.append(clean_lines)
+        # if dir == 90 or dir == 270:
+        #     clusters = fg.dbscan_cluster_lines(got_lines).values()
+        #     if len(clusters) == 0:
+        #         continue
+        #     got_lines = max(fg.dbscan_cluster_lines(got_lines).values(), key=len)
+        # else:
+        #     """
+        #     Circular clustering is treated differently
+        #     BUT since we know all the lines share the vp on top / bottom
+        #     (Bottom doesn't really make sense camera wised, we'll focus)
+        #     We really only care about theta around [0, pi/4] and [3pi/4, pi]
+        #     """
+        #     copied_lines = [[rho, theta + np.pi / 2] for rho, theta in got_lines]
+        #     clusters = fg.dbscan_cluster_lines(copied_lines, indices=True, eps=dir_eps[dir]).values()
+        #     if len(clusters) == 0:
+        #         continue
+        #     copied_lines = max(clusters, key=len)
+        #     got_lines = [got_lines[i] for i in copied_lines]
+        # clean_lines, gap_avg = cvfg.cv_clean_lines(got_lines, dir, image.shape[:2], image)
+        #
+        # if clean_lines is not None:
+        #     print("after", clean_lines)
+        #     find_exact_line(image, clean_lines, 0, green=False)
+        #
+        # final_clusters.append(clean_lines)
     return final_clusters
     #
     #     """

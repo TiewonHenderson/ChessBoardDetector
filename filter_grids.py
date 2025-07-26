@@ -76,14 +76,14 @@ def intersection_polar_lines(line1, line2, need_dir=False, eps=1e-6):
 
     if abs(det) < eps:
         if need_dir:
-            return None, snap_to_cardinal_diagonal(angle_deg)
+            return None, angle_deg
         else:
             return None
 
     # solves system of equations for both lines' ax+by=ρ equation
     x, y = np.linalg.solve(A, B)
     if need_dir:
-        return [round(x), round(y)], snap_to_cardinal_diagonal(angle_deg)
+        return [round(x), round(y)], angle_deg
     return [round(x), round(y)]
 
 

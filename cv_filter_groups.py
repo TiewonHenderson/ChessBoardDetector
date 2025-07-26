@@ -106,7 +106,6 @@ def get_outlier_lines(lines, sect_list, gap_list, direction):
         thetas.pop(index)
         sect_list.pop(index)
 
-
     while i < len(sect_list) - 1:
         # In theory we can use gap_list again, but it requires a lot of operations to keep track
         # Since gap_list is so dynamic its not worth using a static one
@@ -191,20 +190,21 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
     mean = np.mean(np.array(gap_list))
     gap_stats = (mid, mean, mad, dist_med, std_dev)
 
-    # copy_line = lines.copy()
-    # copy_line.append(perd_line)
-    # print("sect_list",sect_list)
-    # print("gap_list",gap_list)
-    # print("lines",lines)
-    # print("stats", gap_stats)
-    # cd.find_exact_line(image, copy_line, index=-1, green=True)
-
     # Only checks biggest interval
     intervals = max(get_intervals(sect_list, gap_list, gap_stats, max_gap), key=len, default=[])
     if len(intervals) >= 2:
         lines = lines[intervals[0]:intervals[-1] + 1]
         sect_list = sect_list[intervals[0]:intervals[-1] + 1]
         gap_list = gap_list[intervals[0]: intervals[-1]]
+
+    copy_line = lines.copy()
+    copy_line.append(perd_line)
+    print("sect_list",sect_list)
+    print("gap_list",gap_list)
+    print("lines",lines)
+    print("stats", gap_stats)
+    cd.find_exact_line(image, copy_line, index=-1, green=True)
+
 
     return lines, [gap for gap in gap_list if gap is not None]
 

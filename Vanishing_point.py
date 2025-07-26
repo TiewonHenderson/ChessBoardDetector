@@ -32,7 +32,7 @@ def most_common_gap(gaps_list):
     return common_gap, buckets[common_gap][1]
 
 
-def most_common_point(points, tolerance=15):
+def most_common_point(points, tolerance=10):
     """
     GPT suggested using cluster to find most common point
     :param points: Expects 3D
