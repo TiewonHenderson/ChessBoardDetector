@@ -6,8 +6,10 @@ from collections import Counter
 from ChessBoardDetector import filter_grids as fg
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
-from ChessBoardDetector import CV_filter_groups as cvfg
+from ChessBoardDetector import cv_filter_groups as cvfg
 from sklearn.cluster import DBSCAN
+from sklearn.linear_model import RANSACRegressor
+from sklearn.linear_model import LinearRegression
 
 
 def most_common_gap(gaps_list):
@@ -117,7 +119,7 @@ def get_all_intersections(lines, image_shape):
     :param image_shape:
     :return:
     """
-    vp_list = []
+    vp_list = [[] for i in range(len(lines))]
     h, w = image_shape
     center_w = [w * (1/4), w * (3/4)]
     center_h = [h * (1/4), h * (3/4)]
@@ -125,9 +127,8 @@ def get_all_intersections(lines, image_shape):
     # Loops appends all intersection points (considered Vanishing points)
     while i < len(lines):
         rho, theta = lines[i]
-        vp_list.append([])
-        j = 0
-        while j < len(lines):
+        j = i
+        while j < len(lines) - 1:
             if i != j:
                 #intersection
                 sect, direction = fg.intersection_polar_lines(lines[i],
@@ -138,16 +139,20 @@ def get_all_intersections(lines, image_shape):
                     if center_w[0] < sect[0] < center_w[1]:
                         if center_h[0] < sect[1] < center_h[1]:
                             vp_list[i].append(([], None))
+                            vp_list[j].append(([], None))
                             j += 1
                             continue
                     # Goes far outside the image, consider as inf VP
                     if abs(sect[0]) > (3 * w) or abs(sect[1]) > (3 * h):
                         vp_list[i].append((None, direction))
+                        vp_list[j].append((None, direction))
                         j += 1
                         continue
                 vp_list[i].append((sect, direction))
+                vp_list[j].append((sect, direction))
             else:
                 vp_list[i].append(([], None))
+                vp_list[j].append(([], None))
             j += 1
         i += 1
     return vp_list
@@ -286,6 +291,7 @@ def has_vanishing_point(lines, image_shape):
 def enough_similar_theta(group):
     """
     Static check for easy parallel check, accept in same theta
+    Mainly for VPs that not directly away from the camera.
     :param group: 2D list of rho, theta lines
     :return: Edits group by reference, returns same object being passed through
     """
@@ -300,4 +306,43 @@ def enough_similar_theta(group):
                 continue
             i += 1
     return group
+
+
+def find_consistent_theta_trend(thetas, min_samples=4, residual_threshold=0.05):
+    """
+    GPT generated in order to get the best rate of theta changes in the cluster
+    Uses RANSAC to find a subset of thetas that follow a consistent linear trend.
+    :param thetas: List or 1D array of theta values (float)
+    :param min_samples: Minimum points needed to assert a model is valid
+    :param residual_threshold: Max allowed error for a point to be an inlier
+    :return: slope of trend, intercept, inlier thetas, indices
+    """
+    if len(thetas) < min_samples:
+        return None, None, [], []
+
+    x = np.arange(len(thetas)).reshape(-1, 1)
+    y = np.array(thetas)
+
+    model = RANSACRegressor(
+        estimator=LinearRegression(),
+        min_samples=min_samples,
+        residual_threshold=residual_threshold,
+        max_trials=1000
+    )
+    try:
+        model.fit(x, y)
+    except ValueError as e:
+        print("RANSAC model likely found nothing")
+        return None, None, [], []
+
+    inlier_mask = model.inlier_mask_
+
+    inlier_indices = np.where(inlier_mask)[0]
+    inlier_thetas = y[inlier_mask]
+
+    slope = model.estimator_.coef_[0]
+    intercept = model.estimator_.intercept_
+
+    return slope, intercept, inlier_thetas, inlier_indices
+
 

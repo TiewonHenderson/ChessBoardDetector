@@ -61,7 +61,7 @@ def intersection_polar_lines(line1, line2, need_dir=False, eps=1e-6):
     # Assume Lines are parallel - calculate direction of infinity
     # Direction vector of the line is perpendicular to normal vector [a, b]
     # So direction is [b, a] (rotated 90 degrees)
-    direction = np.array([-a1, -b1])  # Using first line's coefficients
+    direction = np.array([a1, b1])  # Using first line's coefficients
 
     # Convert direction to angle in image coordinates (origin at top-left)
     # In image coordinates, positive y goes down, so we need to flip y
@@ -131,11 +131,12 @@ def scaled_scoring(cv, max_cv, max_points, power=1):
     return round(score, 5)
 
 
-def label_to_cluster(lines, labels):
+def label_to_cluster(lines, labels, indices):
     """
 
     :param lines: unpacked lines from houghline transformation
     :param labels: Labels from a clustering algorithm to assign each line
+    :param indices: Return indices of lines that belongs to cluster
     :return: A dict representing key = average theta in cluster, value = line clusters (list of [rho, theta])
     """
     clusters = []
@@ -153,7 +154,10 @@ def label_to_cluster(lines, labels):
             sums.append([0,0])
         sums[label][0] += 1
         sums[label][1] += lines[x][1]
-        clusters[label].append(lines[x])
+        if indices:
+            clusters[label].append(x)
+        else:
+            clusters[label].append(lines[x])
 
     cluster_dict = {}
     clusters_index = 0
@@ -162,16 +166,17 @@ def label_to_cluster(lines, labels):
         # Should not consider less then 2 lines for a 8x8 grid
         if len(clusters[clusters_index]) < 2:
             continue
-        if average in cluster_dict:
-            cluster_dict[average].extend(clusters[clusters_index])
+        for key in cluster_dict:
+            if abs(average - key) < 0.02:
+                cluster_dict[key].extend(clusters[clusters_index])
         else:
-            cluster_dict[average] = clusters[clusters_index]
+            cluster_dict[round(average, 5)] = clusters[clusters_index]
         clusters_index += 1
 
     return cluster_dict
 
 
-def dbscan_cluster_lines(lines, eps=0.1):
+def dbscan_cluster_lines(lines, indices=False, eps=0.1):
     """
         Clusters using DBSCAN, then labels each cluster by it's average theta
 
@@ -190,6 +195,7 @@ def dbscan_cluster_lines(lines, eps=0.1):
             0.02      =   1.145916
 
         :param lines: unpacked 2D array of rho,theta values
+        :param indices: Return indices of lines that belongs to cluster
         :param eps: The radian epsilon to cluster lines within
     """
     if len(lines) == 0:
@@ -204,7 +210,9 @@ def dbscan_cluster_lines(lines, eps=0.1):
     clustering = DBSCAN(eps=eps, min_samples=2, algorithm='ball_tree').fit(line_array)  # tune eps
     labels = clustering.labels_
 
-    return label_to_cluster(lines, labels)
+    if eps > 0.1:
+        print(labels)
+    return label_to_cluster(lines, labels, indices)
 
 
 def kmeans_cluster_lines(lines):
@@ -241,11 +249,10 @@ def filter_similar_lines(lines, image_shape):
     filtered = []
     h, w = image_shape
     rho_eps = 0.0264 * min(h, w)
-    theta_eps = 0.0175
+    theta_eps = 0.03
 
     for rho, theta in lines:
         too_close = False
-        theta = normalize_theta(theta)
 
         for filtered_rho, filtered_theta in filtered:
             # Check if both rho and theta values are close

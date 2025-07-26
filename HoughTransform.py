@@ -14,6 +14,19 @@ def put_lines(lines, image, color, thickness=2):
             cv2.line(image, points[0], points[1], color=color, thickness=thickness)
 
 
+def mean_lines(line1, line2):
+
+    """GPT suggested to double theta then use trig functions to get circular theta means"""
+    rho1, theta1 = line1
+    rho2, theta2 = line2
+    rho1, rho2 = abs(rho1), abs(rho2)
+    mean_rho = (rho1 + rho2) / 2
+    x = np.cos(2 * np.array([theta1, theta2]))
+    y = np.sin(2 * np.array([theta1, theta2]))
+    mean_theta = 0.5 * np.arctan2(np.mean(y), np.mean(x))
+    return mean_rho, mean_theta % np.pi
+
+
 def normalize_rho(lines):
     for i, l in enumerate(lines):
         rho, theta = l

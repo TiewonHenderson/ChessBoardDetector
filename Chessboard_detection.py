@@ -3,7 +3,7 @@ import math
 import cv2
 import numpy as np
 from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import CV_filter_groups as cvfg
+from ChessBoardDetector import cv_filter_groups as cvfg
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
 from ChessBoardDetector import Grid_Completion as gc
@@ -41,6 +41,7 @@ gap_eps = 0.85
 
 def image_load(image_name):
     """
+    2073600 is 1920*1080, not a perfect way to downscale but ultra stretched images aren't expected
     :param image_name: The path/name of the image within this dir
     :return: A downscaled cv2 image instance, and an original image (can be None if no downscale)
     """
@@ -49,6 +50,7 @@ def image_load(image_name):
     scale_factor = None
     height, width, _ = image.shape
     if height * width > 2073600:
+        # We need a decent balance of resolution for houghline / harris to work well
         max_width = 1920
         max_height = 1080
 
@@ -65,7 +67,6 @@ def image_load(image_name):
 
 def rescale_all(scale_factor, lines=[], corners=[]):
     """
-
     :param scale_factor:
     :param lines:
     :param corners:
@@ -94,14 +95,12 @@ def houghLine_detect(image_shape, edges, corners, image, mask=None, threshold=4)
     if mask is not None:
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
-    lines = ht.unpack_hough(cv2.HoughLines(e, 1, np.pi / 720, threshold=threshold))
-
-    find_exact_line(image, lines, 0, corners=corners, green=False)
-
+    lines = ht.unpack_hough(cv2.HoughLines(e, 1, np.pi / 360, threshold=threshold))
+    # lines = [[abs(rho), theta] for rho, theta in lines]
     if corners is not None:
         lines = hcd.filter_hough_lines_by_corners(lines, corners)
     lines = fg.filter_similar_lines(lines, image_shape)
-    return ht.normalize_rho(lines)
+    return lines
 
 
 def cluster_lines(image, lines, gap_eps):
@@ -126,11 +125,33 @@ def cluster_lines(image, lines, gap_eps):
     for group in temp:
         indices, dir = group
         got_lines = [lines[i] for i in indices]
-        got_lines.sort(key= lambda x:x[0])
         got_lines = vp.enough_similar_theta(got_lines)
+
+        print("dir", dir)
+        print("before", got_lines)
+        find_exact_line(image, got_lines, 0, green=False)
+        if dir == 0 or dir == 180:
+            """
+            Circular clustering is treated differently
+            BUT since we know all the lines share the vp on top / bottom 
+            (Bottom doesn't really make sense camera wised, we'll focus)
+            We really only care about theta around [0, pi/4] and [3pi/4, pi]
+            """
+            copied_lines = [[rho, theta + np.pi/2] for rho, theta in got_lines]
+            clusters = fg.dbscan_cluster_lines(copied_lines, indices=True, eps=0.2).values()
+            if len(clusters) == 0:
+                continue
+            copied_lines = max(clusters, key=len)
+            got_lines = [got_lines[i] for i in copied_lines]
+        else:
+            clusters = fg.dbscan_cluster_lines(got_lines).values()
+            if len(clusters) == 0:
+                continue
+            got_lines = max(fg.dbscan_cluster_lines(got_lines).values(), key=len)
         clean_lines, gap_avg = cvfg.cv_clean_lines(got_lines, dir, image.shape[:2], image)
 
         if clean_lines is not None:
+            print("after", clean_lines)
             find_exact_line(image, clean_lines, 0, green=False)
 
         final_clusters.append(clean_lines)
@@ -253,7 +274,7 @@ def find_exact_line(image, lines, index, corners=[], green=True):
     ht.show_images(img)
 
 
-def detect_chessboard(image_name, thres_config, d_mode):
+def detect_chessboard(image_name, thres_config):
     """
 
     :param image_name:
@@ -266,12 +287,15 @@ def detect_chessboard(image_name, thres_config, d_mode):
     if origin_img is None:
         origin_img = image
     height, width, _ = image.shape
+    min_gap = 0.0132 * min(height, width)
 
     # Epsilon list (suggested by GPT and tested)
     image_diagonal = np.hypot(width, height)
     gap_eps = 0.1
 
     corners = hcd.harris(image, ksize)
+    # corners = hcd.shi_tomasi(image, ksize, min_gap)
+
     find_exact_line(image, [], None, corners, False)
     # GPT generate to make corner binary map
     binary_map = np.zeros((height, width), dtype=np.uint8)
@@ -300,7 +324,7 @@ def detect_chessboard(image_name, thres_config, d_mode):
                              mask,
                              3)
     # Rounds up due to having extremely long decimals
-    lines = [[round(rho, 3), round(theta, 5)] for rho, theta in lines]
+    lines = [[round(rho, 3), round(theta, 4)] for rho, theta in lines]
 
     find_exact_line(image, lines, 0, corners=corners, green=False)
     print("Finding lines")
@@ -379,7 +403,6 @@ def main():
             ]
 
     detected = False
-    i = 1
     while not detected:
         thres_config = (ksize, edge_thres1, edge_thres2, hline_thres)
         # for j in range(len(easy)):
@@ -388,9 +411,8 @@ def main():
         # for j in range(len(medium)):
         #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
         #     print('done: ', i)
-        for j in range(len(medium)):
-            detect_chessboard(medium[3], thres_config, i)
-        i += 1
+        for j in range(2, len(medium)):
+            detect_chessboard(medium[j], thres_config)
 
 
 if __name__ == "__main__":

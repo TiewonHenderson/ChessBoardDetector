@@ -7,7 +7,7 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
 from scipy.spatial import KDTree
-from ChessBoardDetector import CV_filter_groups as cvfg
+from ChessBoardDetector import cv_filter_groups as cvfg
 
 
 def show_corners(image, points):
@@ -40,9 +40,25 @@ def cluster_duplicates(corner_points, eps):
     return unique_corners
 
 
+def shi_tomasi(image, ksize, min_gap):
+    """
+    shi_tomasi method of corner detection to return cartesian points
+    :param image: Instance of image from cv2
+    :param ksize: Blur intensity of the image
+    :param min_gap: Minimum distance each corner has to be away from
+    :return:
+    """
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (ksize, ksize), 1)
+    corners = cv2.goodFeaturesToTrack(blurred, maxCorners=200, qualityLevel=0.01, minDistance=min_gap/2)
+    corners = np.intp(corners)
+    xy_points = [tuple(pt[0]) for pt in corners]
+    return xy_points
+
 # GPT generated
 def harris(image, ksize):
     """
+    harris corner detection
     Inital function to return cartesian points representing corners
     :param image: Instance of image from cv2
     :param ksize: Blur intensity of the image

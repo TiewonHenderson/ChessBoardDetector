@@ -4,6 +4,7 @@ import numpy as np
 from ChessBoardDetector import filter_grids as fg
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
+from ChessBoardDetector import Vanishing_point as vp
 from ChessBoardDetector import Chessboard_detection as cd
 from math import sin,cos, log10
 from sklearn.cluster import DBSCAN
@@ -31,126 +32,119 @@ def bucket_sort(elements):
     return bucket
 
 
-def get_outlier_lines(lines, sect_list, mask, gap_list, min_gap):
+def get_intervals(sect_list, gap_list, gap_stats, max_gap):
+    """
+    Function meant to detect extreme outlier gaps with mad and cv, mad
+    :param sect_list:
+    :param gap_list:
+    :param gap_stats:
+    :param max_gap:
+    :return:
+    """
+    mid, mean, mad, dist_med, std_dev = gap_stats
+    intervals = [[]]
+    i = 0
+    while i < len(gap_list):
+        # In theory we can use gap_list again, but it requires a lot of operations to keep track
+        # Since gap_list is so dynamic its not worth using a static one
+        gap = round(gap_list[i], 4)
+        if gap > max_gap:
+            ratio = abs(gap / mid)
+            diff = abs(ratio - round(ratio))
+            # Likely a missing line, keep
+            if ratio == 2 and diff < 0.02:
+                intervals[-1].append(i)
+                i += 1
+                continue
+            # Likely different interval if lines with same vp
+            # remember, we're return index of LINES, not gaps
+            z_score = abs((gap - mean) / std_dev)
+            if z_score > 2:
+                intervals[-1].append(i)
+                intervals.append([])
+                i += 1
+                continue
+        # Expand on the previous group
+        intervals[-1].append(i)
+        i += 1
+    # Last line index doesn't get added in loop since len(gap) = len(lines) - 1
+    intervals[-1].append(len(gap_list))
+    return intervals
+
+
+def get_outlier_lines(lines, sect_list, gap_list, direction):
     """
     gap and lines structure:
     lines = [0 , 1 , 2 , 3 , 4..]
     gaps = [   0,  1,  2,  3..]
 
-    to find gap -> lines
-    if gap at i and i + 1 is inconsistent:
-        remove line at i + 1
-    if only i gap is inconsistent:
-        Should only occur on the
-        - border lines
-            remove border line
-        - Overlapping lines
-            handled properly in vp.enough_similar_theta
-            Choose line with evenly spaced theta.
+    This function would handle gaps that are too large or too small:
+    min gap math = sin(25 degree) * 1/4 * 1/8 * min(W, H)
+    The min gap expected is: 0.0132 * min(W, H)
+    The max gap would definitely be 0.15 * max(W, H)
+
     :param lines: Original list of lines represented as [rho, theta]
     :param sect_list: The list of intersection formed from a perpendicular line and lines
-                      Assumed sorted and not aligned with lines, which is the role of mask
-    :param mask: Masks the indices from sect_list to lines, in effect, masking gap_list to lines as well
-    :param gap_list: The gaps between the sorted points in sect_list
+                      Assumed lines is aligned with sect_list
+    :param stats: Gap states formatted as a tuple: (mid, mean, mad, dist_med, std_dev)
     :param min_gap: The minimum distance acceptable as a grid square between two lines
     """
 
-    """
-    Due to gap_list needing to line up with the mask variable
-    lines that are soon to be not included will form None gap values.
-    The gaps of the other lines will represent the gaps skipping the bad line
-
-    lines = [0 , 1 , 2 , 3 , 4..]
-    gaps = [   0,  1,  2,  3..]
-    """
-    # MAD and CV to find outliers
-    mid = np.median(gap_list)
-    mad, dist_med = check_MAD(gap_list, get_mad=True)
-    std_dev = np.std(np.array(gap_list))
-    mean = np.mean(np.array(gap_list))
-
-    bad_lines = []
-    def update(index, bad_lines=bad_lines, gap_list=gap_list):
-        """repeated operation to update bad_lines"""
-        if index > 0:
-            if gap_list[index - 1] is not None:
-                gap_list[index - 1] += gap_list[index]
-        gap_list[index] = None
-        bad_lines.append(index)
-
+    mid, mean, mad, dist_med, std_dev = stats
     i = 0
     intervals = [[]]
-    while i < len(gap_list):
-        gap = gap_list[i]
+    lines_c = lines.copy()
+    thetas = [lines_c[j][1] for j in range(len(lines_c))]
+    print(theta_trend)
+    theta_diff = 0
+
+    def update(index, lines=lines_c, sect_list=sect_list, thetas=thetas):
+        """
+        removes elements in list params
+        """
+        lines.pop(index)
+        thetas.pop(index)
+        sect_list.pop(index)
+
+
+    while i < len(sect_list) - 1:
+        # In theory we can use gap_list again, but it requires a lot of operations to keep track
+        # Since gap_list is so dynamic its not worth using a static one
+        p1 = np.array(sect_list[i])
+        p2 = np.array(sect_list[i + 1])
+        gap = round(float(np.linalg.norm(p1 - p2)), 4)
         """
         Overlapping laps causes mingap, those check don't need to evaluate intervals of gaps
+        Len of line is expected to be at least 5
         """
-        if gap is not None:
-            if gap < min_gap:
-                # Checks the relative growth/shrunk of theta to see if the line fits
-                l1_var_test = []
-                l2_var_test = []
-                # Cannot check surrounding lines on border, use consecutive lines as reference
-                if i < len(gap_list) - 1:
-                    l1_var_test = [lines[mask[j]][1] for j in range(len(lines)) if j != i + 1]
-                    l2_var_test = [lines[mask[j]][1] for j in range(len(lines)) if j != i]
-                elif i == len(gap_list) - 1:
-                    # reverse range from len(lines) - 3 to 0
-                    l1_var_test = [lines[mask[j]][1] for j in range(len(lines) - 3, -1, -1)].append(lines[mask[i]])
-                    l2_var_test = [lines[mask[j]][1] for j in range(len(lines) - 3, -1, -1)].append(lines[mask[i - 1]])
-                l1_mad, l1_cv = check_imbalance(l1_var_test, index=-1, get_score=True)
-                l2_mad, l2_cv = check_imbalance(l2_var_test, index=-1, get_score=True)
-                # CV matter more in this context
-                if l1_cv < l2_cv:
-                    update(i + 1)
-                elif l1_cv > l2_cv:
-                    update(i)
-                else:
-                    if l1_mad < l2_mad:
-                        update(i + 1)
-                    else:
-                        update(i)
-            elif param_check_imbalance(gap_list, mid, mad, dist_med, std_dev, mean, i):
-                # Border line cases, they can only form 1 bad group
-                # remember, we're return index of LINES, not gaps
-                other_index = None
-                if i == 0:
-                    other_index = [i + 1]
-                elif i == len(gap_list) - 1:
-                    other_index = [i - 1]
-                else:
-                    # All other cases, check both sides
-                    other_index = [i - 1, i + 1]
-                for index in other_index:
-                    # If gap is None, it was likely removed, this neighboring gap is also likely bad
-                    if gap_list[index] is None:
-                        update(i)
-                    # 0-1 gap is bad, but so is 1-2, so line 1 is bad
-                    # n-1 - n gap is bad, but so is n-2 - n-1, so line n-1 is bad
-                    z_score = abs((gap_list[index] - mean) / std_dev)
-                    if gap_list[index] < min_gap or z_score > 2:
-                        if gap_scale > 2.2:
-                            intervals.append([])
-                        update(index)
-                # 0-1 gap is bad, but 1-2 isnt, so line 0 is bad
-                # n-1 - n gap is bad, but n-2 - n-1 isnt, so line n is bad
-                update(i)
-            # Expand on the previous group
-            else:
-                intervals[-1].append(i)
-        i += 1
 
-    return bad_lines
+        if gap < min_gap:
+            # Theta is close, see if meaning them together is good
+            t1 = thetas[i - theta_diff]
+            t2 = thetas[i + 1 - theta_diff]
+            if abs(t1 - t2) < 0.04:
+                rho1, _ = lines_c[i]
+                rho2, _ = lines_c[i + 1]
+                if abs(abs(rho1) - abs(rho2)) < min_gap/2:
+                    # relative rho is close, mean the lines
+                    m_rho, m_theta = ht.mean_lines(lines_c[i], lines_c[i + 1])
+                    lines_c[i] = [m_rho, m_theta]
+                    update(i + 1)
+                    continue
+        i += 1
+    return lines_c, [sublist for sublist in intervals if len(sublist) > 1]
 
 
 def cv_clean_lines(lines, direction, image_shape, image=None):
     """
     Minimum gap expectation:
     Chessboard >= 1/4 * (image area)
+    8 Grids = 1/8 gap
     Horizontal tilt >= 25 degree (0 degree == same angle as chessboard, cannot see grid)
 
-    min(W, H) / 2 / 8 * sin(25°)
-    final formula for minimum gap expectation = 0.0264 * min(W, H)
+    1/4 * 1/8 * sin(25degree) = 0.0132
+    The min gap expected is: 0.0132 * min(W, H)
+    The max gap would definitely be 0.15 * max(W, H)
 
     Uses a perpendicular line in respect to given direction in order to get
     better consistent gap calculation
@@ -167,7 +161,8 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
     if len(lines) < 4:
         return None, None
     h, w = image_shape
-    min_gap = 0.0264 * min(h, w)
+    min_gap = 0.0132 * min(h, w)
+    max_gap = 0.15 * max(h, w)
     # Gets the middle of the lines group and perpendicular theta
     cx = w / 2
     cy = h / 2
@@ -180,44 +175,38 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
     # Sorts by x then y
     sect_list = sorted(sect_list, key=lambda p: (p[1][0], p[1][1]))
 
-    # Extract indices and points separately
-    mask = [item[0] for item in sect_list]
+    # Aligns lines to the intersections saved in sect_list
+    lines = [lines[item[0]] for item in sect_list]
     sect_list = [item[1] for item in sect_list]
+    sect_array = np.array(sect_list)  # convert list of points to numpy array
+    gap_list = list(np.linalg.norm(sect_array[1:] - sect_array[:-1], axis=1))
 
-    gap_list = []
-    for i in range(len(sect_list) - 1):
-        p1 = np.array(sect_list[i])
-        p2 = np.array(sect_list[i + 1])
-        gap_list.append(round(float(np.linalg.norm(p1 - p2)), 4))
-
-    print(gap_list)
-    cd.find_exact_line(image, lines, 0, green=False)
-
+    # MAD and CV only on gap_list
     mid = np.median(gap_list)
     if mid < 0.1:
         # If majority of the gap is < 0.1, this groups is definitely bad
         return None, None
+    mad, dist_med = check_MAD(gap_list, get_mad=True)
+    std_dev = np.std(np.array(gap_list))
+    mean = np.mean(np.array(gap_list))
+    gap_stats = (mid, mean, mad, dist_med, std_dev)
 
-    # gets priority theta by bucket sort
-    buckets = bucket_sort([l[1] for l in lines])
-    most_theta = max(buckets, key=lambda k: buckets[k])
-    if buckets[most_theta] < 2:
-        # No point in priority theta with all different theta
-        most_theta = None
+    # copy_line = lines.copy()
+    # copy_line.append(perd_line)
+    # print("sect_list",sect_list)
+    # print("gap_list",gap_list)
+    # print("lines",lines)
+    # print("stats", gap_stats)
+    # cd.find_exact_line(image, copy_line, index=-1, green=True)
 
-    # Removes the labelled bad lines
-    bad_lines = get_outlier_lines(lines, sect_list, mask, gap_list, min_gap)
+    # Only checks biggest interval
+    intervals = max(get_intervals(sect_list, gap_list, gap_stats, max_gap), key=len, default=[])
+    if len(intervals) >= 2:
+        lines = lines[intervals[0]:intervals[-1] + 1]
+        sect_list = sect_list[intervals[0]:intervals[-1] + 1]
+        gap_list = gap_list[intervals[0]: intervals[-1]]
 
-    ret_lines = []
-    new_gaps = []
-    i = 0
-    while i < len(lines):
-        if i in bad_lines:
-            i += 1
-            continue
-        ret_lines.append(lines[mask[i]])
-        i += 1
-    return ret_lines, [gap for gap in gap_list if gap is not None]
+    return lines, [gap for gap in gap_list if gap is not None]
 
 
 def cv_check_grid(group1, group2):
@@ -242,7 +231,6 @@ def cv_check_grid(group1, group2):
             sect_matrix[j].append(sect)
 
 
-
 def check_MAD(elements, std_dev=3.5, get_mad=False, get_score=False):
     """
         Median Absolute Deviation (MAD)
@@ -256,8 +244,12 @@ def check_MAD(elements, std_dev=3.5, get_mad=False, get_score=False):
     :return:
     """
     if len(elements) < 3:
+        if get_score:
+            return None
         return []
-    elem_copy = np.array(elements)
+    elem_copy = elements
+    if not isinstance(elements, np.ndarray):
+        elem_copy = np.array(elements)
     # 2 or less lines cannot form > 1 gap
     # Find MAD, we can treat it like a general standard deviation
     median = np.median(elem_copy)
@@ -280,7 +272,7 @@ def check_MAD(elements, std_dev=3.5, get_mad=False, get_score=False):
             outliers.append(mod_z_score)
             continue
         # Apparantly 3.5 std dev is a good indication of outlier
-        if mod_z_score > std_dev:
+        elif mod_z_score > std_dev:
             outliers.append(i)
 
     return outliers
@@ -321,6 +313,8 @@ def check_imbalance(elements, new_element=None, index=None, get_score=False):
              1 = consistent throughout
     """
     if not elements or len(elements) < 3:
+        if get_score:
+            return None, None
         return 0
     elem_copy = np.array(elements)
     test_element = None
@@ -340,14 +334,14 @@ def check_imbalance(elements, new_element=None, index=None, get_score=False):
     std_dev = np.std(elem_copy)
     mean = np.mean(elem_copy)
 
-    if mean < 0.0001:
+    if mean < 0.0001 and not get_score:
         # CV cannot be calculate, but MAD passed, keep new gap
         return 2
 
     cv = std_dev / mean
     if get_score:
         # early return for scores only
-        return outliers, cv
+        return abs(outliers), abs(cv)
 
     if cv < 0.1:
         return 2
@@ -365,7 +359,7 @@ def param_check_imbalance(elements, median, mad, dist_med, std_dev, mean, index=
     """
     A non-calculated version of check_imbalance
     since mad, distance to median, standard deviation, and mean doesn't need to be recalculated
-    :param elements: A 1D array of numerical value
+    :param elements: A 1D array of numerical value, could also be listed 1 value
     :param median: Median of the original element list
     :param mad: Median Absolute Deviation value of a given list of elements
     :param dist_med: Distance to median throughout the entire list
@@ -374,14 +368,11 @@ def param_check_imbalance(elements, median, mad, dist_med, std_dev, mean, index=
     :param index: Index of element to check if its an outlier (add to end if elements if want to check new element)
     :return: False means it not an outlier, True means it is. None means the element index couldnt be accessed
     """
-    if elements is None or len(elements) == 0 or len(elements) <= index:
+    if elements is None or len(elements) <= 0 or len(elements) <= index:
         return None
 
     if mad == 0:
-        mad = np.median(np.unique(dist_med))
-        if mad < 0.0001:
-            # All values are the same to cause 0, not an outlier
-            return False
+        mad = 0.01
 
     mod_z_score = 0.6745 * (elements[index] - median) / mad
     # Apparantly 2.5-3.5 std dev is a good indication of outlier
