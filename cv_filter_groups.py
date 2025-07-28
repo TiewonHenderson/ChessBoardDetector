@@ -2,19 +2,19 @@ import sys
 import cv2
 import numpy as np
 from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
-from ChessBoardDetector import Vanishing_point as vp
 from ChessBoardDetector import Chessboard_detection as cd
-from math import sin,cos, log10
+from ChessBoardDetector import Remove_outliers as ro
+from math import sin,cos
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
 
 
-def bucket_sort(elements):
+def bucket_sort(elements, threshold=0.4):
     """
     Bucket sort to get max quantity of item
     :param elements: A 1d list of elements
+    :param threshold: How close the bucket needs to be to be accepted in the same bucket
     :return: A dict of elements counted with 0.04 difference threshold
     """
     # gets priority theta by bucket sort
@@ -25,117 +25,77 @@ def bucket_sort(elements):
         # GPT generated, going through all keys to get the closest one to current theta
         closest_key = min(bucket.keys(), key=lambda k: abs(k - x))
         # Around 2 degrees
-        if abs(closest_key - x) < 0.04:
+        if abs(closest_key - x) < threshold:
             bucket[closest_key] += 1
         else:
             bucket[round(float(x), 5)] = 1
     return bucket
 
 
-def get_intervals(sect_list, gap_list, gap_stats, max_gap):
+def get_intervals(gap_list, gap_stats, max_gap, min_gap):
     """
     Function meant to detect extreme outlier gaps with mad and cv, mad
-    :param sect_list:
     :param gap_list:
     :param gap_stats:
     :param max_gap:
+    :param min_gap:
     :return:
     """
-    mid, mean, mad, dist_med, std_dev = gap_stats
+    med, mean, mad, dist_med, std_dev = gap_stats
+    mad_scores = check_MAD(gap_list, get_score=True)
     intervals = [[]]
     i = 0
+    combine_last = False
+    # Shows the previous gap was more then min_gap
+    prev_gap = True
+
+    def can_add(i, intervals=intervals):
+        if len(intervals[-1]) == 0 or i not in intervals[-1][-1]:
+            return True
+        return False
+
     while i < len(gap_list):
         # In theory we can use gap_list again, but it requires a lot of operations to keep track
         # Since gap_list is so dynamic its not worth using a static one
         gap = round(gap_list[i], 4)
-        if gap > max_gap:
-            ratio = abs(gap / mid)
-            diff = abs(ratio - round(ratio))
-            # Likely a missing line, keep
-            if ratio == 2 and diff < 0.02:
-                intervals[-1].append(i)
-                i += 1
-                continue
+        if gap > max_gap or (mad_scores[i] > 2.5 and gap > med):
             # Likely different interval if lines with same vp
-            # remember, we're return index of LINES, not gaps
             z_score = abs((gap - mean) / std_dev)
+            if can_add(i):
+                intervals[-1].append([i])
             if z_score > 2:
-                intervals[-1].append(i)
                 intervals.append([])
-                i += 1
-                continue
-        # Expand on the previous group
-        intervals[-1].append(i)
+        elif gap < min_gap:
+            # Overlapping line belong to the same SET
+            # Same interval line belong to the same LIST
+            if prev_gap or len(intervals[-1]) == 0:
+                intervals[-1].append([])
+            if can_add(i):
+                intervals[-1][-1].append(i)
+            intervals[-1][-1].append(i + 1)
+            if i == len(gap_list) - 1:
+                combine_last = True
+            prev_gap = False
+            i += 1
+            continue
+        else:
+            if can_add(i):
+                intervals[-1].append([i])
+            combine_last = False
+            prev_gap = True
+        prev_gap = True
         i += 1
-    # Last line index doesn't get added in loop since len(gap) = len(lines) - 1
-    intervals[-1].append(len(gap_list))
+    if not combine_last:
+        intervals[-1].append([len(gap_list)])
     return intervals
 
 
-def get_outlier_lines(lines, sect_list, gap_list, direction):
+def cv_clean_lines(lines, direction, image_shape, image=None):
     """
     gap and lines structure:
     lines = [0 , 1 , 2 , 3 , 4..]
     gaps = [   0,  1,  2,  3..]
 
-    This function would handle gaps that are too large or too small:
-    min gap math = sin(25 degree) * 1/4 * 1/8 * min(W, H)
-    The min gap expected is: 0.0132 * min(W, H)
-    The max gap would definitely be 0.15 * max(W, H)
-
-    :param lines: Original list of lines represented as [rho, theta]
-    :param sect_list: The list of intersection formed from a perpendicular line and lines
-                      Assumed lines is aligned with sect_list
-    :param stats: Gap states formatted as a tuple: (mid, mean, mad, dist_med, std_dev)
-    :param min_gap: The minimum distance acceptable as a grid square between two lines
-    """
-
-    mid, mean, mad, dist_med, std_dev = stats
-    i = 0
-    intervals = [[]]
-    lines_c = lines.copy()
-    thetas = [lines_c[j][1] for j in range(len(lines_c))]
-    print(theta_trend)
-    theta_diff = 0
-
-    def update(index, lines=lines_c, sect_list=sect_list, thetas=thetas):
-        """
-        removes elements in list params
-        """
-        lines.pop(index)
-        thetas.pop(index)
-        sect_list.pop(index)
-
-    while i < len(sect_list) - 1:
-        # In theory we can use gap_list again, but it requires a lot of operations to keep track
-        # Since gap_list is so dynamic its not worth using a static one
-        p1 = np.array(sect_list[i])
-        p2 = np.array(sect_list[i + 1])
-        gap = round(float(np.linalg.norm(p1 - p2)), 4)
-        """
-        Overlapping laps causes mingap, those check don't need to evaluate intervals of gaps
-        Len of line is expected to be at least 5
-        """
-
-        if gap < min_gap:
-            # Theta is close, see if meaning them together is good
-            t1 = thetas[i - theta_diff]
-            t2 = thetas[i + 1 - theta_diff]
-            if abs(t1 - t2) < 0.04:
-                rho1, _ = lines_c[i]
-                rho2, _ = lines_c[i + 1]
-                if abs(abs(rho1) - abs(rho2)) < min_gap/2:
-                    # relative rho is close, mean the lines
-                    m_rho, m_theta = ht.mean_lines(lines_c[i], lines_c[i + 1])
-                    lines_c[i] = [m_rho, m_theta]
-                    update(i + 1)
-                    continue
-        i += 1
-    return lines_c, [sublist for sublist in intervals if len(sublist) > 1]
-
-
-def cv_clean_lines(lines, direction, image_shape, image=None):
-    """
     Minimum gap expectation:
     Chessboard >= 1/4 * (image area)
     8 Grids = 1/8 gap
@@ -156,13 +116,18 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
 
              !can return None, None if group of lines were determined as bad!
     """
+
+    def get_gaps(sect_list):
+        """Gets gaps between the intersection points in its order"""
+        sect_array = np.array(sect_list)  # convert list of points to numpy array
+        return np.linalg.norm(sect_array[1:] - sect_array[:-1], axis=1)
+
     # Not enough lines to be considered a grid
     if len(lines) < 4:
-        return None, None
+        return None
     h, w = image_shape
     min_gap = 0.0132 * min(h, w)
     max_gap = 0.15 * max(h, w)
-    # Gets the middle of the lines group and perpendicular theta
     cx = w / 2
     cy = h / 2
     perd_theta = (np.deg2rad(direction) + np.pi / 2) % np.pi
@@ -170,43 +135,55 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
     perd_line = (cx * np.cos(perd_theta) + cy * np.sin(perd_theta), perd_theta)
 
     # Gets intersections of each line to the perd_line, i to keep lines index intact
-    sect_list = [(i, fg.intersection_polar_lines(perd_line, l)) for i, l in enumerate(lines)]
     # Sorts by x then y
+    sect_list = [(i, fg.intersection_polar_lines(perd_line, l)) for i, l in enumerate(lines)]
     sect_list = sorted(sect_list, key=lambda p: (p[1][0], p[1][1]))
 
     # Aligns lines to the intersections saved in sect_list
     lines = [lines[item[0]] for item in sect_list]
     sect_list = [item[1] for item in sect_list]
-    sect_array = np.array(sect_list)  # convert list of points to numpy array
-    gap_list = list(np.linalg.norm(sect_array[1:] - sect_array[:-1], axis=1))
+    gap_list = get_gaps(sect_list)
 
     # MAD and CV only on gap_list
-    mid = np.median(gap_list)
-    if mid < 0.1:
+    med = np.median(gap_list)
+    if med < 0.1:
         # If majority of the gap is < 0.1, this groups is definitely bad
         return None, None
     mad, dist_med = check_MAD(gap_list, get_mad=True)
     std_dev = np.std(np.array(gap_list))
     mean = np.mean(np.array(gap_list))
-    gap_stats = (mid, mean, mad, dist_med, std_dev)
-
-    # Only checks biggest interval
-    intervals = max(get_intervals(sect_list, gap_list, gap_stats, max_gap), key=len, default=[])
-    if len(intervals) >= 2:
-        lines = lines[intervals[0]:intervals[-1] + 1]
-        sect_list = sect_list[intervals[0]:intervals[-1] + 1]
-        gap_list = gap_list[intervals[0]: intervals[-1]]
+    gap_stats = (med, mean, mad, dist_med, std_dev)
 
     copy_line = lines.copy()
     copy_line.append(perd_line)
-    print("sect_list",sect_list)
-    print("gap_list",gap_list)
-    print("lines",lines)
+    print("sect_list", sect_list)
+    print("gap_list", gap_list)
+    print("lines", lines)
     print("stats", gap_stats)
+    print("min, max", min_gap, max_gap)
     cd.find_exact_line(image, copy_line, index=-1, green=True)
 
+    # Only checks biggest interval
+    intervals = max(get_intervals(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
+    print("intervals", intervals)
+    if len(intervals) >= 2:
 
-    return lines, [gap for gap in gap_list if gap is not None]
+        got_lines = None
+        if direction == 0 or direction == 180:
+            got_lines = ro.remove_outlier_away(intervals, lines)
+        elif direction == 90:
+            got_lines = ro.remove_outlier_parallel(intervals, lines)
+        else:
+            got_lines = ro.remove_outlier_norm(intervals, lines, direction)
+
+        print("got lines", got_lines)
+        cd.find_exact_line(image, got_lines, index=-1, green=False)
+        # ht.curve_fit_lines(intervals, lines, direction)
+
+        return got_lines
+
+    print("Filtered out all important lines, NO group found")
+    return None
 
 
 def cv_check_grid(group1, group2):
@@ -244,8 +221,6 @@ def check_MAD(elements, std_dev=3.5, get_mad=False, get_score=False):
     :return:
     """
     if len(elements) < 3:
-        if get_score:
-            return None
         return []
     elem_copy = elements
     if not isinstance(elements, np.ndarray):
@@ -263,7 +238,7 @@ def check_MAD(elements, std_dev=3.5, get_mad=False, get_score=False):
         # mad being 0 means more then half of the gaps are the same
         mad = np.median(np.unique(dist_med))
         if mad == 0:
-            return []
+            return [0 for i in range(len(elements))]
     outliers = []
     for i, x in enumerate(elements):
         mod_z_score = 0.6745 * (x - median) / mad

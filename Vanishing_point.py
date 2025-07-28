@@ -8,8 +8,6 @@ from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
 from ChessBoardDetector import cv_filter_groups as cvfg
 from sklearn.cluster import DBSCAN
-from sklearn.linear_model import RANSACRegressor
-from sklearn.linear_model import LinearRegression
 
 
 def most_common_gap(gaps_list):
@@ -32,10 +30,11 @@ def most_common_gap(gaps_list):
     return common_gap, buckets[common_gap][1]
 
 
-def most_common_point(points, tolerance=10):
+def most_common_point(points, image_shape, tolerance=10):
     """
     GPT suggested using cluster to find most common point
     :param points: Expects 3D
+    :param image_shape: [height, width] of the image
     :param tolerance: Area of pixel toleration (how much offset area to be considered a shared VP)
     :return: Gets a list of indices for most common intersection points (vanishing points) and the angle direction
              is represented as a unit circle (0 degree is left, 90 degree is vertical top)
@@ -89,13 +88,7 @@ def most_common_point(points, tolerance=10):
     # Extract all points within each cluster
     indexes = [mask[i] for i, l in enumerate(db.labels_) if l == max_index]
 
-    # Extract most dominant direction of VP
-    all_points = [points[i] for i in indexes]
-    directions = [direction for _, direction in all_points]
-    direction_counts = Counter(directions)
-    most_common_direction, count = direction_counts.most_common(1)[0]
-
-    return indexes, most_common_direction
+    return indexes
 
 
 def get_all_intersections(lines, image_shape):
@@ -276,16 +269,33 @@ def has_vanishing_point(lines, image_shape):
         # no parallel lines were found for current line
         # Multi-sharing VP lines needs to run
         if i not in good_lines:
-            results, direction = most_common_point(vp_list[i], min(h,w)/10)
+            results = most_common_point(vp_list[i], image_shape, min(h,w)/10)
             if results is None:
                 continue
             if len(results) < 3 or len(results) > 10:
                 continue
+            # Get direction by most counted theta, (majority is better)
+            theta_to_dir = [fg.snap_to_cardinal_diagonal(np.rad2deg(lines[x][1])) for x in results]
+            dir_counter = Counter(theta_to_dir)
+            most_common_dir, _ = dir_counter.most_common(1)[0]
             used.add(index for index in results)
-            for index in results:
-                good_lines[i] = (results, direction)
+            good_lines[i] = (results, most_common_dir)
 
     return finalize_groups(good_lines, lines)
+
+
+def average_theta(group):
+    """
+    Helper function, intersections doesn't give clear messages.
+
+    TO-DO optimize this to use unit circle instead
+    :param group:
+    :return:
+    """
+    snapped_angles = []
+    for _, theta in group:
+        snapped_angles.append(fg.snap_to_cardinal_diagonal(np.rad2deg(theta)) % 180)
+    return fg.snap_to_cardinal_diagonal(np.mean(snapped_angles))
 
 
 def enough_similar_theta(group):
@@ -306,43 +316,5 @@ def enough_similar_theta(group):
                 continue
             i += 1
     return group
-
-
-def find_consistent_theta_trend(thetas, min_samples=4, residual_threshold=0.05):
-    """
-    GPT generated in order to get the best rate of theta changes in the cluster
-    Uses RANSAC to find a subset of thetas that follow a consistent linear trend.
-    :param thetas: List or 1D array of theta values (float)
-    :param min_samples: Minimum points needed to assert a model is valid
-    :param residual_threshold: Max allowed error for a point to be an inlier
-    :return: slope of trend, intercept, inlier thetas, indices
-    """
-    if len(thetas) < min_samples:
-        return None, None, [], []
-
-    x = np.arange(len(thetas)).reshape(-1, 1)
-    y = np.array(thetas)
-
-    model = RANSACRegressor(
-        estimator=LinearRegression(),
-        min_samples=min_samples,
-        residual_threshold=residual_threshold,
-        max_trials=1000
-    )
-    try:
-        model.fit(x, y)
-    except ValueError as e:
-        print("RANSAC model likely found nothing")
-        return None, None, [], []
-
-    inlier_mask = model.inlier_mask_
-
-    inlier_indices = np.where(inlier_mask)[0]
-    inlier_thetas = y[inlier_mask]
-
-    slope = model.estimator_.coef_[0]
-    intercept = model.estimator_.intercept_
-
-    return slope, intercept, inlier_thetas, inlier_indices
 
 

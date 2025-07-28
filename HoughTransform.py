@@ -4,6 +4,19 @@ import cv2
 import numpy as np
 from ChessBoardDetector import filter_grids as fg
 from ChessBoardDetector import HarrisCornerDetection as hcd
+from ChessBoardDetector import cv_filter_groups as cvfg
+from sklearn.cluster import DBSCAN
+from scipy.optimize import curve_fit
+from collections import Counter
+
+
+def flatten_lines(lines):
+    """Helper function to flatten grouped overlapping lines"""
+    flat = []
+    for l in lines:
+        for x in l:
+            flat.append(x)
+    return flat
 
 
 def put_lines(lines, image, color, thickness=2):
@@ -36,6 +49,15 @@ def normalize_rho(lines):
             theta = theta % (2 * np.pi)
             lines[i] = [rho, theta]
     return lines
+
+
+def circle_theta(theta):
+    """
+    Adds 45 degree to theta, mainly used on directions being 0, 180
+    :param theta:
+    :return:
+    """
+    return (theta + np.pi/4) % np.pi
 
 
 def slope_from_theta(theta, max):
@@ -126,202 +148,51 @@ def orthogonal_gap(line1, line2):
         return delta_rho
 
 
-def sort_Rho(lines, eps):
-    """
-    Old method of sorting groups of lines by static distance between each of them.
-    Works well with flatter lines like:
-    - top down perspectives
-    - on corner perspectives.
+def curve_fit_lines(intervals, lines, direction):
 
-    Sort and groups lines by their rho (distance to the original, top left of images)
-    Uses sliding window to get the best interval of similar gapped lines (gap is determined by rho)
-    groups are merged by the difference of gap created by the next two lines
-                                        to the group's mean gap is less then eps
-    :param lines: unpacked 2D array of rho,theta values
-    :param eps: how lenient the gap acceptance is (how off the difference can be to be accepted)
-    :return: A 2D list that are grouped based off gap between them,
-            with a 1D array representing gap average of each group of lines
-    """
-    # Not enough lines to be considered a grid
-    if len(lines) <= 4:
-        return [lines], []
-    copy_line = [fg.normalize_line(line) for line in lines]
-    copy_line.sort(key=lambda x: x[0])
-    # temp = []
-    # for i in range(0, len(lines) - 1):
-    #     temp.append(abs(lines[i][0] - lines[i + 1][0]))
-    # print("gaps: ", temp)
+    if len(intervals) < 3:
+        return []
+    x = np.arange(len(intervals))
+    y = []
+    for l in intervals:
+        if len(l) > 1:
+            overlap_ts = [lines[i][1] for i in l]
+            if direction == 0 or direction == 180:
+                overlap_ts = [circle_theta(t) for t in overlap_ts]
+            y.append(np.median(overlap_ts))
+        elif len(l) == 1:
+            if direction == 0 or direction == 180:
+                y.append(circle_theta(lines[l[-1]][1]))
+                continue
+            y.append(lines[l[-1]][1])
+    y = np.array(y)
 
-    prev_gap = abs(orthogonal_gap(copy_line[0], copy_line[1]))
-    candidates = []
-    gap_average = [prev_gap]
-    l = 0
-    i = 1
-    # print("prev_gap", prev_gap)
-    while i <= len(copy_line) - 1:
-        gap_mean = gap_average[-1] / (i - l)
-        if i == len(copy_line) - 1:
-            gap_average[-1] = gap_mean
-            candidates.append([l, i])
-            break
-        gap = abs(orthogonal_gap(copy_line[i], copy_line[i + 1]))
-        # print("gap", gap)
-        # print("gap mean", gap_average)
-        # Since these are clustered as similar theta, same rho should be combined into 1 line
-        if gap == 0:
-            rho, t1 = copy_line[i]
-            _, t2 = copy_line[i + 1]
-            copy_line[i] = [rho, (t1 + t2)/2]
-            copy_line.pop(i + 1)
-            continue
-        gap_eps = eps * gap_mean
-        # print("gap eps:", gap_eps)
-        # End window if its above eps, continue otherwise
-        if abs(gap - gap_mean) > gap_eps:
-            gap_average[-1] = gap_mean
-            gap_average.append(0)
-            candidates.append([l, i])
-            l = i
-        prev_gap = gap
-        gap_average[-1] += gap
-        i += 1
-    """
-    Filters candidates, if there isn't any candidates totalling lines > 4
-    The function will return the max lines candidate
-    
-    if there is candidates totalling lines > 4
-    Include all in sorted_list
-    """
-    sorted_list = []
-    max_cand = 0 # Stored by index
-    for i, cand in enumerate(candidates):
-        group_len = abs(cand[1] - cand[0])
-        prev_max_len = abs(candidates[max_cand][1] - candidates[max_cand][0])
-        # range() is [x,y), doesn't include y
-        sorted_list.append([copy_line[i] for i in range(cand[0], cand[1] + 1)])
-        if group_len > prev_max_len:
-            max_cand = i
-    if len(sorted_list) == 0:
-        start, end = candidates[max_cand]
-        return [[copy_line[i] for i in range(start, end + 1)]], gap_average
-    return sorted_list, gap_average
+    # Define model functions
+    def linear(x, a, b):
+        return a * x + b
+
+    def quadratic(x, a, b, c):
+        return a * x ** 2 + b * x + c
+
+    # Fit both models, params represents the coefficients for the function
+    params_lin, _ = curve_fit(linear, x, y)
+    params_quad, _ = curve_fit(quadratic, x, y)
+
+    # Compute residuals
+    res_lin = np.sum((linear(x, *params_lin) - y) ** 2)
+    res_quad = np.sum((quadratic(x, *params_quad) - y) ** 2)
+
+    # Quadratic should fit better for only these directions
+    y_pred = None
+    y_pred = quadratic(x, *params_quad)
+
+    # Now it evaluates the quadratic line of x with the found coefficients
+    # We use it to compare to our theta (difference in residuals)
+    residuals = np.abs(y - y_pred)
+    mad, dist_med = cvfg.check_MAD(residuals, get_mad=True)
+    outliers = dist_med > 3 * mad
+    outlier_indices = np.where(outliers)[0]
+    print("Outlier indices:", outlier_indices)
 
 
-def gap_Interpolation(sorted_list, gap_average, image_shape):
-    """
-    This function will determine if groups should be combined due to missing lines within a grid
-    Some cases could be missing lines, causing a multiplied gap distance
 
-    This would require these conditions:
-    1)  The two groups have similar average gap value inside
-    2)  The gap between the groups (not the gaps inside) is a multiple of the gap values
-    3)  The sum or all lines WITH interpolated lines should not overcome a threshold,
-        should never be over 18 lines total.
-    :param: sorted_list/gap_average: should be straight from sort_Rhos
-    :return:
-    """
-    line_groups = sorted_list.copy()
-    group_gaps = gap_average.copy()
-
-    # Group gap = the gap in between the two groups
-    # Average gap = the average gap WITHIN a group
-    if len(sorted_list) < 2 or len(gap_average) < 2:
-        return sorted_list
-
-    h, w = image_shape
-    mean_eps = np.hypot(w,h) * 0.005
-    group_gap_eps = 0.1
-
-    i = 0
-    while i < len(line_groups) - 1:
-        groupA = line_groups[i]
-        groupB = line_groups[i + 1]
-        if len(groupA) == 0:
-            line_groups.pop(i)
-            group_gaps.pop(i)
-            continue
-        if len(groupB) == 0:
-            line_groups.pop(i + 1)
-            group_gaps.pop(i + 1)
-            continue
-
-        # Condition 1
-        gap_diff = abs(group_gaps[i + 1] - group_gaps[i])
-        if gap_diff <= mean_eps:
-
-            # Condition 2
-            groupA_end_rho = line_groups[i][-1][0]
-            # Since the groups are inclusive both end, we must skip the index since
-            # Last index of previous group == first index of next group
-            groupB_start_rho = line_groups[i + 1][1][0]
-            group_gap = abs(groupB_start_rho - groupA_end_rho)
-            group_average = (group_gaps[i] + group_gaps[i + 1]) / 2
-            # Calculates if the group gap diff is a multiple by eps
-            ratio = group_gap / group_average
-            m_value = round(ratio)  # Important, this would be the group gap multiplicity value
-            diff = abs(ratio - m_value)
-            # What this meant is only accept if <= 10% off a whole number multiplicity value
-            if diff <= group_gap_eps:
-
-                # Condition 3
-                # The multiplicity of the group gap indicates the amount of interpolated lines inbetween
-                total_lines = len(line_groups[i]) + (m_value - 1) + len(line_groups[i + 1])
-                if total_lines <= 18:
-
-                    # All conditions suffice
-                    theta_avg = 0
-                    for l in groupA:
-                        theta_avg += l[1]
-                    for l in groupB:
-                        theta_avg += l[1]
-                    theta_avg /= (len(groupA) + len(groupB))
-
-                    for j in range(1, m_value):
-                        line_groups[i].append([groupA_end_rho + (group_average * j), theta_avg])
-                    line_groups[i].extend(groupB[1:])
-                    line_groups.pop(i + 1)
-                    group_gaps.pop(i + 1)
-                    continue
-        i += 1
-
-    i = 0
-    while i < len(line_groups):
-        if len(line_groups[i]) < 3:
-            line_groups.pop(i)
-            continue
-        i += 1
-    return line_groups
-
-
-def image_load(image_name):
-    image = cv2.imread(image_name)
-    # Get image dimensions
-    height, width, _ = image.shape
-    if height * width > 2073600:
-        max_width = 1920
-        max_height = 1080
-
-        # Calculate scaling factor, to maintain aspect ratio
-        scale_factor = min(max_width / width, max_height / height)
-
-        new_width = int(width * scale_factor)
-        new_height = int(height * scale_factor)
-
-        image = cv2.resize(image, (new_width, new_height))
-        height = new_height
-        width = new_width
-
-    # Create a binary mask with center region = 1, borders = 0
-    # This will disgard 10% of the width and 6% of the height outer borders
-    w_ratio = 0.1
-    h_ratio = 0.06
-    mask = np.zeros((height, width), dtype=np.uint8)
-    cv2.rectangle(
-        mask,
-        # top-left corner
-        (int(width * w_ratio), int(height * h_ratio)),
-        # bottom-right corner
-        (int(width * (1 - w_ratio)), int(height * (1 - h_ratio))),
-        255,
-        thickness=-1
-    )

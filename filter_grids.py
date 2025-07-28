@@ -16,6 +16,7 @@ def snap_to_cardinal_diagonal(angle):
     """
     # Target angles: cardinal and diagonal directions
     targets = [0, 45, 90, 135, 180, 225, 270, 315]
+    orientation_dict = {}
 
     # Find the target with minimum distance
     min_distance = float('inf')
@@ -76,14 +77,14 @@ def intersection_polar_lines(line1, line2, need_dir=False, eps=1e-6):
 
     if abs(det) < eps:
         if need_dir:
-            return None, angle_deg
+            return None, snap_to_cardinal_diagonal(angle_deg)
         else:
             return None
 
     # solves system of equations for both lines' ax+by=ρ equation
     x, y = np.linalg.solve(A, B)
     if need_dir:
-        return [round(x), round(y)], angle_deg
+        return [round(x), round(y)], snap_to_cardinal_diagonal(angle_deg)
     return [round(x), round(y)]
 
 
@@ -210,8 +211,6 @@ def dbscan_cluster_lines(lines, indices=False, eps=0.1):
     clustering = DBSCAN(eps=eps, min_samples=2, algorithm='ball_tree').fit(line_array)  # tune eps
     labels = clustering.labels_
 
-    if eps > 0.1:
-        print(labels)
     return label_to_cluster(lines, labels, indices)
 
 
@@ -235,10 +234,10 @@ def filter_similar_lines(lines, image_shape):
     Filters similar lines by checking if rho and theta differences are below thresholds
     Compares orientation
 
-    rho_eps = 0.0264 * min(W, H)
+    rho_eps = 0.0132 * min(W, H)
     Which is the minimum gap expected
 
-    theta_eps = 0.0175 radian = ~1 degree
+    theta_eps = 0.03 radian = ~2 degree
 
     :param lines: unpacked 2D array of rho,theta values
     :param image_shape: [height, width] of the image
@@ -248,15 +247,16 @@ def filter_similar_lines(lines, image_shape):
 
     filtered = []
     h, w = image_shape
-    rho_eps = 0.0264 * min(h, w)
+    rho_eps = 0.005 * min(h, w)
     theta_eps = 0.03
 
     for rho, theta in lines:
+        temp_rho = abs(rho)
         too_close = False
 
         for filtered_rho, filtered_theta in filtered:
             # Check if both rho and theta values are close
-            rho_close = abs(rho - filtered_rho) < rho_eps
+            rho_close = abs(temp_rho - filtered_rho) < rho_eps
             theta_close = abs(theta - filtered_theta) < theta_eps
 
             if rho_close and theta_close:

@@ -485,19 +485,13 @@ def processSingle(filename):
     return None, None
 
 def main():
-    test1 = ["Taken_Photos/left,25angle.png",
-             "Taken_Photos/left,random,25angle.png",
-             "Taken_Photos/top,random,rotated.png",
-             "Taken_Photos/top,random.png",
-             "Taken_Photos/top,rotated.png",
-             "Taken_Photos/top.png",
-             "Taken_Photos/left,65angle.png",
-             "Taken_Photos/left,random,45angle.png",
-             "Taken_Photos/left,rotated,45angle.png",
-             "Taken_Photos/left,rotated,random,45angle.png",
-             "Taken_Photos/left,rotated,65angle.png",
-             "Taken_Photos/left,rotated,random,65angle.png"
-             ]
+    test1 = ["Taken_Photos/left,65angle.png",
+              "Taken_Photos/left,random,45angle.png",
+              "Taken_Photos/left,rotated,45angle.png",
+              "Taken_Photos/left,rotated,random,45angle.png",
+              "Real_Photos/Mid,not_angled,flat.jpeg",
+              "Real_Photos/Mid,not_angled,flat2.jpg",
+              "Real_Photos/Mid,somewhat_angled,flat.png"]
     current_dir = Path(__file__).resolve().parent
     parent_dir = current_dir.parent
     filenames = test1

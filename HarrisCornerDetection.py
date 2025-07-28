@@ -50,13 +50,13 @@ def shi_tomasi(image, ksize, min_gap):
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (ksize, ksize), 1)
-    corners = cv2.goodFeaturesToTrack(blurred, maxCorners=200, qualityLevel=0.01, minDistance=min_gap/2)
+    corners = cv2.goodFeaturesToTrack(blurred, maxCorners=200, qualityLevel=0.01, minDistance=min_gap)
     corners = np.intp(corners)
-    xy_points = [tuple(pt[0]) for pt in corners]
+    xy_points = [list(pt[0]) for pt in corners]
     return xy_points
 
 # GPT generated
-def harris(image, ksize):
+def harris(image, ksize, mask):
     """
     harris corner detection
     Inital function to return cartesian points representing corners
@@ -66,8 +66,12 @@ def harris(image, ksize):
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (ksize, ksize), 1)
 
-    # OpenCV’s cornerHarris internally computes gradients and matrix M
-    dst = cv2.cornerHarris(blurred, blockSize=2, ksize=3, k=0.04)
+    """
+    blockSize = How big the kernel is to compare in general
+    ksize = How big the sobel gradient kernel is for (how the intensity is changing)
+    k = sensitivity constant for separating corners form normal edges
+    """
+    dst = cv2.cornerHarris(blurred, blockSize=3, ksize=ksize + 2, k=0.03)
 
     # Dilate to find local maxima
     dst_dilated = cv2.dilate(dst, None)
@@ -81,6 +85,7 @@ def harris(image, ksize):
 
     # Combine masks: points that are local maxima AND above threshold
     corner_mask = np.logical_and(local_max_mask, threshold_mask)
+    corner_mask = np.logical_and(corner_mask, mask)
 
     # Get coordinates of final corners
     corner_points = np.argwhere(corner_mask)
