@@ -3,10 +3,7 @@ import numpy as np
 from math import sin,cos
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import filter_grids as fg
-"""
 
-
-"""
 
 def insert_dummy_lines(groups):
     """

@@ -3,13 +3,10 @@ import cv2
 from math import sin,cos
 from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
-from sklearn.metrics import pairwise_distances
-from skimage.color import rgb2lab
-from scipy import ndimage
 from scipy.spatial import KDTree
 
 
-def snap_to_cardinal_diagonal(angle):
+def snap_to_cardinal_diagonal(angle, cardinal_threshold=15):
     """
     Snap an angle to the nearest cardinal or diagonal direction.
     Claude generated
@@ -22,11 +19,14 @@ def snap_to_cardinal_diagonal(angle):
     min_distance = float('inf')
     closest_target = 0
 
-    for target in targets:
+    for i, target in enumerate(targets):
         # Calculate distance considering circular nature of angles
         distance = min(abs(angle - target), 360 - abs(angle - target))
 
         if distance < min_distance:
+            # cardinal degrees are snapped on when they're really CLOSE
+            if i % 2 == 0 and distance > cardinal_threshold:
+                continue
             min_distance = distance
             closest_target = target
 
@@ -177,7 +177,7 @@ def label_to_cluster(lines, labels, indices):
     return cluster_dict
 
 
-def dbscan_cluster_lines(lines, indices=False, eps=0.1):
+def dbscan_cluster_lines(lines, indices=False, eps=0.02):
     """
         Clusters using DBSCAN, then labels each cluster by it's average theta
 
@@ -208,7 +208,7 @@ def dbscan_cluster_lines(lines, indices=False, eps=0.1):
     """
     DBSCAN expects a 2d np array representing points
     """
-    clustering = DBSCAN(eps=eps, min_samples=2, algorithm='ball_tree').fit(line_array)  # tune eps
+    clustering = DBSCAN(eps=eps, min_samples=2, algorithm='ball_tree').fit(line_array)
     labels = clustering.labels_
 
     return label_to_cluster(lines, labels, indices)
@@ -234,7 +234,7 @@ def filter_similar_lines(lines, image_shape):
     Filters similar lines by checking if rho and theta differences are below thresholds
     Compares orientation
 
-    rho_eps = 0.0132 * min(W, H)
+    rho_eps = 0.01 * H
     Which is the minimum gap expected
 
     theta_eps = 0.03 radian = ~2 degree
@@ -246,8 +246,9 @@ def filter_similar_lines(lines, image_shape):
         return lines
 
     filtered = []
+    # Aspect ratio is 1:1
     h, w = image_shape
-    rho_eps = 0.005 * min(h, w)
+    rho_eps = 0.01 * h
     theta_eps = 0.03
 
     for rho, theta in lines:
@@ -255,8 +256,9 @@ def filter_similar_lines(lines, image_shape):
         too_close = False
 
         for filtered_rho, filtered_theta in filtered:
+            temp_f_rho = abs(filtered_rho)
             # Check if both rho and theta values are close
-            rho_close = abs(temp_rho - filtered_rho) < rho_eps
+            rho_close = abs(temp_rho - temp_f_rho) < rho_eps
             theta_close = abs(theta - filtered_theta) < theta_eps
 
             if rho_close and theta_close:
@@ -319,7 +321,7 @@ def check_grid_like(group1, group2, image_shape=None, corners=[]):
                 row.append(None)
                 continue
             if c_tree is not None and image_shape is not None:
-                eps = max(h, w) / 100
+                eps = h / 100
                 """
                 KD-tree allows searching for same/similar points (intersections) without
                 brute forcing all points

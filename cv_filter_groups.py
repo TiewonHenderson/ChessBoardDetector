@@ -2,12 +2,11 @@ import sys
 import cv2
 import numpy as np
 from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import HoughTransform as ht
 from ChessBoardDetector import Chessboard_detection as cd
 from ChessBoardDetector import Remove_outliers as ro
 from math import sin,cos
+from collections import Counter
 from sklearn.cluster import DBSCAN
-from sklearn.cluster import KMeans
 
 
 def bucket_sort(elements, threshold=0.4):
@@ -32,17 +31,34 @@ def bucket_sort(elements, threshold=0.4):
     return bucket
 
 
+def get_rep_gap(gap_within_thres, eps=10):
+    """
+    Get the best representing gap for the given list of gap
+    :param gap_within_thres:
+    :param eps: Could be min_gap?
+    :return:
+    """
+    np_gap = np.array(gap_within_thres)
+    clustering = DBSCAN(eps=eps, min_samples=2, algorithm='ball_tree').fit(np_gap)
+
+    labels, counts = np.unique(clustering.labels_, return_counts=True)
+    most_common_label = labels[np.argmax(counts)] # Corresponds to the aligned index
+    most_common_points = np_gap[clustering.labels_ == most_common_label]
+
+    return
+
+
 def get_intervals(gap_list, gap_stats, max_gap, min_gap):
     """
     Function meant to detect extreme outlier gaps with mad and cv, mad
+    2 std_dev away means 95%, most likely outlier
     :param gap_list:
     :param gap_stats:
     :param max_gap:
     :param min_gap:
     :return:
     """
-    med, mean, mad, dist_med, std_dev = gap_stats
-    mad_scores = check_MAD(gap_list, get_score=True)
+    med, mean, mad, std_dev = gap_stats
     intervals = [[]]
     i = 0
     combine_last = False
@@ -58,9 +74,9 @@ def get_intervals(gap_list, gap_stats, max_gap, min_gap):
         # In theory we can use gap_list again, but it requires a lot of operations to keep track
         # Since gap_list is so dynamic its not worth using a static one
         gap = round(gap_list[i], 4)
-        if gap > max_gap or (mad_scores[i] > 2.5 and gap > med):
+        if gap > max_gap or (abs(gap - mean) > 2 * std_dev and gap > med):
             # Likely different interval if lines with same vp
-            z_score = abs((gap - mean) / std_dev)
+            z_score = abs((gap - med) / mad)
             if can_add(i):
                 intervals[-1].append([i])
             if z_score > 2:
@@ -102,7 +118,7 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
     Horizontal tilt >= 25 degree (0 degree == same angle as chessboard, cannot see grid)
 
     1/4 * 1/8 * sin(25degree) = 0.0132
-    The min gap expected is: 0.0132 * min(W, H)
+    The min gap expected is: 0.0132 * max(W, H)
     The max gap would definitely be 0.15 * max(W, H)
 
     Uses a perpendicular line in respect to given direction in order to get
@@ -124,15 +140,14 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
 
     # Not enough lines to be considered a grid
     if len(lines) < 4:
-        return None
+        return None, None
     h, w = image_shape
-    min_gap = 0.0132 * min(h, w)
-    max_gap = 0.15 * max(h, w)
-    cx = w / 2
-    cy = h / 2
+    min_gap = 0.0132 * h
+    max_gap = 0.15 * h
+    center_p = w / 2
     perd_theta = (np.deg2rad(direction) + np.pi / 2) % np.pi
     # Formula given by GPT to get perpendicular line at center of image
-    perd_line = (cx * np.cos(perd_theta) + cy * np.sin(perd_theta), perd_theta)
+    perd_line = (center_p * np.cos(perd_theta) + center_p * np.sin(perd_theta), perd_theta)
 
     # Gets intersections of each line to the perd_line, i to keep lines index intact
     # Sorts by x then y
@@ -144,20 +159,22 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
     sect_list = [item[1] for item in sect_list]
     gap_list = get_gaps(sect_list)
 
-    # MAD and CV only on gap_list
-    med = np.median(gap_list)
-    if med < 0.1:
-        # If majority of the gap is < 0.1, this groups is definitely bad
+    # Gaps within the threshold to get statistics surrounding found gaps is better
+    within_thres_gaps = [gap for gap in gap_list if gap >= min_gap and gap <= max_gap]
+    if len(within_thres_gaps) < 3:
+        # If majority of the gap is bad, this group is bad
         return None, None
-    mad, dist_med = check_MAD(gap_list, get_mad=True)
-    std_dev = np.std(np.array(gap_list))
-    mean = np.mean(np.array(gap_list))
-    gap_stats = (med, mean, mad, dist_med, std_dev)
+    med = np.median(within_thres_gaps)
+    mad, _ = check_MAD(within_thres_gaps, get_mad=True)
+    std_dev = np.std(np.array(within_thres_gaps))
+    mean = np.mean(np.array(within_thres_gaps))
+    gap_stats = (med, mean, mad, std_dev)
+
 
     copy_line = lines.copy()
     copy_line.append(perd_line)
     print("sect_list", sect_list)
-    print("gap_list", gap_list)
+    print("gap_list", within_thres_gaps)
     print("lines", lines)
     print("stats", gap_stats)
     print("min, max", min_gap, max_gap)
@@ -165,25 +182,30 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
 
     # Only checks biggest interval
     intervals = max(get_intervals(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
-    print("intervals", intervals)
     if len(intervals) >= 2:
-
+        print("intervals", intervals)
         got_lines = None
         if direction == 0 or direction == 180:
             got_lines = ro.remove_outlier_away(intervals, lines)
-        elif direction == 90:
+        elif direction == 90 or direction == 270:
             got_lines = ro.remove_outlier_parallel(intervals, lines)
         else:
             got_lines = ro.remove_outlier_norm(intervals, lines, direction)
 
-        print("got lines", got_lines)
-        cd.find_exact_line(image, got_lines, index=-1, green=False)
-        # ht.curve_fit_lines(intervals, lines, direction)
+        if len(got_lines) == 0:
+            return None, None
+        # With removed lines, we get the new average direction by new thetas
+        theta_to_dir = [fg.snap_to_cardinal_diagonal(np.rad2deg(l[1])) for l in got_lines]
+        dir_counter = Counter(theta_to_dir)
+        most_common_dir, _ = dir_counter.most_common(1)[0]
 
-        return got_lines
+        # print("got lines", got_lines, "\nnew dir", most_common_dir)
+        # cd.find_exact_line(image, got_lines, index=-1, green=False)
+
+        return got_lines, most_common_dir
 
     print("Filtered out all important lines, NO group found")
-    return None
+    return None, None
 
 
 def cv_check_grid(group1, group2):
@@ -231,14 +253,13 @@ def check_MAD(elements, std_dev=3.5, get_mad=False, get_score=False):
     dist_med = np.abs(elem_copy - median)
     mad = np.median(dist_med)
 
-    if get_mad:
-        return mad, dist_med
-
     if mad == 0:
         # mad being 0 means more then half of the gaps are the same
         mad = np.median(np.unique(dist_med))
-        if mad == 0:
+        if mad == 0 and not get_mad:
             return [0 for i in range(len(elements))]
+    if get_mad:
+        return mad, dist_med
     outliers = []
     for i, x in enumerate(elements):
         mod_z_score = 0.6745 * (x - median) / mad
@@ -411,7 +432,6 @@ def dbscan_cluster_lines(lines, image_shape):
     """
     if len(lines) == 0:
         return {}
-    h, w = image_shape
     line_array = np.array([
         [theta % np.pi]
         for rho, theta in lines  # Use lines directly
@@ -431,25 +451,6 @@ def dbscan_cluster_lines(lines, image_shape):
 
     clusters, left_overs, theta_labels = label_to_cluster(lines, labels, eps)
     return clusters, left_overs, theta_labels
-
-
-def kmeans_cluster_lines(lines, image_shape):
-    """
-    Uses 1D KMeans to cluster theta (normalized)
-    :param lines: unpacked 2D array of rho,theta values
-    :return:
-    """
-    line_array = lines.copy()
-    line_array = np.array([
-        [sin(2 * theta), cos(2 * theta)]
-        for _, theta in line_array
-    ])
-    labels = KMeans(n_clusters=2, n_init='auto').fit_predict(line_array)
-    max_eps = 0.174533
-    clusters, _ = label_to_cluster(lines, labels, max_eps)
-    return clusters
-    # clusters, left_overs, theta_labels = label_to_cluster(lines, labels, max_eps)
-    # return clusters, left_overs, theta_labels
 
 
 def label_to_cluster(lines, labels, eps):

@@ -1,12 +1,8 @@
 import sys
-
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
-from sklearn.cluster import KMeans
-from scipy.spatial import KDTree
 from ChessBoardDetector import cv_filter_groups as cvfg
 
 
@@ -40,17 +36,21 @@ def cluster_duplicates(corner_points, eps):
     return unique_corners
 
 
-def shi_tomasi(image, ksize, min_gap):
+def shi_tomasi(image, ksize, min_gap, points=200):
     """
     shi_tomasi method of corner detection to return cartesian points
     :param image: Instance of image from cv2
     :param ksize: Blur intensity of the image
     :param min_gap: Minimum distance each corner has to be away from
+    :param points:
     :return:
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (ksize, ksize), 1)
-    corners = cv2.goodFeaturesToTrack(blurred, maxCorners=200, qualityLevel=0.01, minDistance=min_gap)
+    corners = cv2.goodFeaturesToTrack(blurred,
+                                      maxCorners=points,
+                                      qualityLevel=0.01,
+                                      minDistance=min_gap)
     corners = np.intp(corners)
     xy_points = [list(pt[0]) for pt in corners]
     return xy_points
@@ -91,7 +91,7 @@ def harris(image, ksize, mask):
     corner_points = np.argwhere(corner_mask)
     corner_points = corner_points[:, [1, 0]]  # convert to (x, y)
     height, width, _ = image.shape
-    eps = max(width, height) / 100
+    eps = height / 100
 
     return cluster_duplicates(corner_points, eps)
 
@@ -114,38 +114,53 @@ def hough_line_intersect(line, point, tolerance=1):
     return False
 
 
-def consistent_gaps(points, get_variance=False):
+def point_masking(points, min_gap, tolerance=5, needed_score=3):
     """
-    Uses MAD to find median gap, and if majority of the points
+    Use each gap and create a 1x7 mask with distance
     :param points: collection of (x,y)/[x,y], length must be >= 4
-    :param get_variance: Gets the variance of the points given instead of a boolean
+    :param min_gap: Minimum gap expected between points
+    :param tolerance:
+    :param needed_score:
     :return:
     """
-    gaps = []
-    points_copy = np.array([[x, y] for x, y in points])
-    """
-        Gets distance to the nearest point instead
-        Slots n neighbors closest to each point, needs to be 2 or it'll use itself
-        Distance is the dist to the neighboring points
-        Indices represent the point index in the list
-    """
-    neighbors = NearestNeighbors(n_neighbors=2).fit(points_copy)
-    distances, indices = neighbors.kneighbors(points_copy)
-    # Take the distance to the nearest *other* point (exclude self at index 0)
-    nearest_dists = distances[:, 1]
+    # Gets the x, y difference to be used as a 1x7 point masking
+    points_copy = np.array(list(points))                  #N
+    sorted_points = points_copy[np.lexsort((points_copy[:, 1], points_copy[:, 0]))]
+    step_diffs = np.diff(sorted_points, axis=0)     # N-1
+    best_points = None
+    for i, diff in enumerate(step_diffs):
+        # Stage to get the interpolated points
+        x_d, y_d = diff
+        x0, y0 = points_copy[i]
+        x1, y1 = points_copy[i + 1]
+        masking_pts = []
+        for j in range(1, 8):
+            pt_before = [x0 - (j * x_d), y0 - (j * y_d)]
+            pt_after = [x1 + (j * x_d), y1 + (j * y_d)]
+            masking_pts.append(pt_before)
+            masking_pts.append(pt_after)
 
-    # Finds mad and makes sure every distance is within it
-    outliers = cvfg.check_MAD(nearest_dists, 1.5)
-    if abs(len(points) - len(outliers)) < 4:
-        return False
+        # Stage to see if any points
+        passing_pts = [points_copy[i], points_copy[i + 1]]
+        for mask_pt in masking_pts:
+            for index, point in enumerate(sorted_points):
+                if index == i or index == i + 1:
+                    continue
+                if np.linalg.norm(mask_pt - point) < tolerance:
+                    passing_pts.append(point)
 
-    return True
+        # Remove duplicates if any
+        passing_pts = np.unique(passing_pts, axis=0)
+        if len(passing_pts) >= needed_score:
+            return passing_pts.tolist()
+    return None
 
 
-def filter_hough_lines_by_corners(lines, corners, min_hits=3):
+def filter_hough_lines_by_corners(lines, corners, min_gap, tolerance=5, min_hits=3):
     """
     :param lines:
     :param corners:
+    :param min_gap
     :param tolerance: Represented by total pixels off to be considered intersecting a corner
     :param min_hits: The amount of intersections a line needs to be added
     :return:
@@ -158,7 +173,7 @@ def filter_hough_lines_by_corners(lines, corners, min_hits=3):
                 hits.add(tuple(point))
         # Rest of intersected points are appended to 2nd list
         if len(hits) >= min_hits:
-            if consistent_gaps(hits):
+            if point_masking(hits, min_gap) is not None:
                 filtered_lines.append(l)
     return filtered_lines
 

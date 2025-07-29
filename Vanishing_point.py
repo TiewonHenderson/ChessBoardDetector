@@ -4,8 +4,6 @@ import math
 import numpy as np
 from collections import Counter
 from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import HarrisCornerDetection as hcd
-from ChessBoardDetector import HoughTransform as ht
 from ChessBoardDetector import cv_filter_groups as cvfg
 from sklearn.cluster import DBSCAN
 
@@ -30,7 +28,7 @@ def most_common_gap(gaps_list):
     return common_gap, buckets[common_gap][1]
 
 
-def most_common_point(points, image_shape, tolerance=10):
+def most_common_point(points, image_shape, tolerance=10, bound=5):
     """
     GPT suggested using cluster to find most common point
     :param points: Expects 3D
@@ -64,6 +62,11 @@ def most_common_point(points, image_shape, tolerance=10):
     points_np = np.array(valid_points)  # Shape (N, 2)
 
     # Cluster with fixed radius (tolerance)
+    """
+    example of result
+    labels = [-1, 0, 1]
+    counts = [2, 3, 3]
+    """
     db = DBSCAN(eps=tolerance, min_samples=1).fit(points_np)
     labels, counts = np.unique(db.labels_, return_counts=True)
 
@@ -87,6 +90,13 @@ def most_common_point(points, image_shape, tolerance=10):
 
     # Extract all points within each cluster
     indexes = [mask[i] for i, l in enumerate(db.labels_) if l == max_index]
+    if len(indexes) < 2:
+        return None, None
+    gotten_points = np.array([points[i][0] for i in indexes])
+    center = gotten_points.mean(axis=0)
+
+    h, w = image_shape
+    l_bound, r_bound = w * (1/bound), w * ((bound-1)/bound)
 
     return indexes
 
@@ -100,22 +110,22 @@ def get_all_intersections(lines, image_shape):
 
     angle direction represents where the VP is to relative to the center of the image
     degree
-    0           Right
+    0           Top
     45          Top right
-    90          Up
-    135         Top left
-    180         Left
+    90          Right
+    135         Bottom right
+    180         Down
     225         Bottom left
-    270         Down
-    315         Bottom right
+    270         Left
+    315         Top left
     :param lines:
     :param image_shape:
     :return:
     """
     vp_list = [[] for i in range(len(lines))]
+    # image aspect ratio is 1:1
     h, w = image_shape
-    center_w = [w * (1/4), w * (3/4)]
-    center_h = [h * (1/4), h * (3/4)]
+    center = [w * (1/4), w * (3/4)]
     i = 0
     # Loops appends all intersection points (considered Vanishing points)
     while i < len(lines):
@@ -129,12 +139,11 @@ def get_all_intersections(lines, image_shape):
                                                               need_dir=True)
                 if sect is not None:
                     # If vp is within the center, that makes no sense, don't append that
-                    if center_w[0] < sect[0] < center_w[1]:
-                        if center_h[0] < sect[1] < center_h[1]:
-                            vp_list[i].append(([], None))
-                            vp_list[j].append(([], None))
-                            j += 1
-                            continue
+                    if center[0] < sect[0] < center[1]:
+                        vp_list[i].append(([], None))
+                        vp_list[j].append(([], None))
+                        j += 1
+                        continue
                     # Goes far outside the image, consider as inf VP
                     if abs(sect[0]) > (3 * w) or abs(sect[1]) > (3 * h):
                         vp_list[i].append((None, direction))
@@ -217,8 +226,6 @@ def has_vanishing_point(lines, image_shape):
     # List of list of points
     vp_list = get_all_intersections(lines, image_shape)
     h, w = image_shape
-    center_w = [w * (1/4), w * (3/4)]
-    center_h = [h * (1/4), h * (3/4)]
 
     # for x in vp_list:
     #     print(x)
@@ -229,6 +236,7 @@ def has_vanishing_point(lines, image_shape):
     used = set()
     good_lines = {}
     shared_vp_lines = []
+    priority_directions = {0, 45, 90, 135, 180, 225, 270, 315}
     for i, line_vp in enumerate(vp_list):
         # Line is already used, don't search again
         if i in used:
@@ -282,39 +290,3 @@ def has_vanishing_point(lines, image_shape):
             good_lines[i] = (results, most_common_dir)
 
     return finalize_groups(good_lines, lines)
-
-
-def average_theta(group):
-    """
-    Helper function, intersections doesn't give clear messages.
-
-    TO-DO optimize this to use unit circle instead
-    :param group:
-    :return:
-    """
-    snapped_angles = []
-    for _, theta in group:
-        snapped_angles.append(fg.snap_to_cardinal_diagonal(np.rad2deg(theta)) % 180)
-    return fg.snap_to_cardinal_diagonal(np.mean(snapped_angles))
-
-
-def enough_similar_theta(group):
-    """
-    Static check for easy parallel check, accept in same theta
-    Mainly for VPs that not directly away from the camera.
-    :param group: 2D list of rho, theta lines
-    :return: Edits group by reference, returns same object being passed through
-    """
-    buckets = cvfg.bucket_sort([l[1] for l in group])
-    most_theta = max(buckets, key=lambda k: buckets[k])
-    if buckets[most_theta] >= len(group):
-        # If there is a dominant theta, remove all other thetas
-        i = 0
-        while i < len(group):
-            if abs(group[i][1] - most_theta) > 0.04:
-                group.pop(i)
-                continue
-            i += 1
-    return group
-
-

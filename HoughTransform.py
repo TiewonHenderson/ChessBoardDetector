@@ -132,6 +132,8 @@ def unpack_hough(lines):
 def orthogonal_gap(line1, line2):
     """
     Perpendicular spacing = Δρ/cos(θ)
+    Update:
+    Really only works when the thetas are similar to each other
     :param line1:
     :param line2:
     :return:
@@ -146,53 +148,3 @@ def orthogonal_gap(line1, line2):
         return delta_rho / denom
     else:
         return delta_rho
-
-
-def curve_fit_lines(intervals, lines, direction):
-
-    if len(intervals) < 3:
-        return []
-    x = np.arange(len(intervals))
-    y = []
-    for l in intervals:
-        if len(l) > 1:
-            overlap_ts = [lines[i][1] for i in l]
-            if direction == 0 or direction == 180:
-                overlap_ts = [circle_theta(t) for t in overlap_ts]
-            y.append(np.median(overlap_ts))
-        elif len(l) == 1:
-            if direction == 0 or direction == 180:
-                y.append(circle_theta(lines[l[-1]][1]))
-                continue
-            y.append(lines[l[-1]][1])
-    y = np.array(y)
-
-    # Define model functions
-    def linear(x, a, b):
-        return a * x + b
-
-    def quadratic(x, a, b, c):
-        return a * x ** 2 + b * x + c
-
-    # Fit both models, params represents the coefficients for the function
-    params_lin, _ = curve_fit(linear, x, y)
-    params_quad, _ = curve_fit(quadratic, x, y)
-
-    # Compute residuals
-    res_lin = np.sum((linear(x, *params_lin) - y) ** 2)
-    res_quad = np.sum((quadratic(x, *params_quad) - y) ** 2)
-
-    # Quadratic should fit better for only these directions
-    y_pred = None
-    y_pred = quadratic(x, *params_quad)
-
-    # Now it evaluates the quadratic line of x with the found coefficients
-    # We use it to compare to our theta (difference in residuals)
-    residuals = np.abs(y - y_pred)
-    mad, dist_med = cvfg.check_MAD(residuals, get_mad=True)
-    outliers = dist_med > 3 * mad
-    outlier_indices = np.where(outliers)[0]
-    print("Outlier indices:", outlier_indices)
-
-
-
