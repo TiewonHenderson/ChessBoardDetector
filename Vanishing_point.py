@@ -42,11 +42,14 @@ def most_common_point(points, image_shape, tolerance=10, bound=5):
 
     mask = []
     valid_points = []
+    dim, _ = image_shape
+    # Vanishing points that coverges to a point within these directions are useless
+    invalid_dir = {135, 180, 225}
     # Checks points is a list of (sect, direction)
     if isinstance(points[0], tuple):
         for i, result in enumerate(points):
             sect, direction = result
-            if sect is None or len(sect) == 0:
+            if sect is None or len(sect) == 0 or direction in invalid_dir:
                 continue
             valid_points.append(sect)
             mask.append(i)
@@ -54,7 +57,8 @@ def most_common_point(points, image_shape, tolerance=10, bound=5):
         # If points is a 3d list
         for i in range(len(points)):
             for j in range(len(points[i])):
-                if points[i][j]:
+                # vanishing point should not be within the area of the camera (impossible situation normally)
+                if points[i][j] and points[i][j][1] < 3*dim/4:
                     valid_points.append(points[i][j])
                     mask.append(j)
     if len(valid_points) == 0:
@@ -124,14 +128,14 @@ def get_all_intersections(lines, image_shape):
     """
     vp_list = [[] for i in range(len(lines))]
     # image aspect ratio is 1:1
-    h, w = image_shape
-    center = [w * (1/4), w * (3/4)]
+    dim, _ = image_shape
+    center = [dim * (1/4), dim * (3/4)]
     i = 0
     # Loops appends all intersection points (considered Vanishing points)
     while i < len(lines):
         rho, theta = lines[i]
-        j = i
-        while j < len(lines) - 1:
+        j = i + 1
+        while j < len(lines):
             if i != j:
                 #intersection
                 sect, direction = fg.intersection_polar_lines(lines[i],
@@ -139,13 +143,15 @@ def get_all_intersections(lines, image_shape):
                                                               need_dir=True)
                 if sect is not None:
                     # If vp is within the center, that makes no sense, don't append that
-                    if center[0] < sect[0] < center[1]:
+                    if center[0] < sect[0] < center[1] and center[0] < sect[1] < center[1]:
                         vp_list[i].append(([], None))
                         vp_list[j].append(([], None))
                         j += 1
                         continue
                     # Goes far outside the image, consider as inf VP
-                    if abs(sect[0]) > (3 * w) or abs(sect[1]) > (3 * h):
+                    dist_to_mid_x = abs(sect[0] - dim / 2)
+                    dist_to_mid_y = abs(sect[1] - dim / 2)
+                    if dist_to_mid_x > (3 * dim) or dist_to_mid_y > (3 * dim):
                         vp_list[i].append((None, direction))
                         vp_list[j].append((None, direction))
                         j += 1
@@ -153,6 +159,7 @@ def get_all_intersections(lines, image_shape):
                 vp_list[i].append((sect, direction))
                 vp_list[j].append((sect, direction))
             else:
+                # Append nothing for self lines
                 vp_list[i].append(([], None))
                 vp_list[j].append(([], None))
             j += 1
@@ -164,7 +171,7 @@ def finalize_groups(group_dict, lines):
     """
     Used after has_vanishing_point is run, as it outputs a lot of duplicate and similar groups
     This function will combine/remove duplicates
-    :param group_dict: A dictionary of key: line indices, value = (lines, direction)
+    :param group_dict: A dictionary of key: line indices, value = set( (lines as frozen set, direction) )
     :param lines: The original list of lines
     :return: A list of tuples (lines, direction), maybe add average gap but not sure
     """
@@ -186,7 +193,11 @@ def finalize_groups(group_dict, lines):
         return len(intersection) >= min(len(g1), len(g2)) or len(intersection) >= max(len(g1), len(g2))/2
 
     # Removes absolute duplicates by set collections
-    unique_values = list(set((tuple(list), dir) for list, dir in group_dict.values()))
+    unique_values = []
+    for set_tuples in group_dict.values():
+        for line_dir in set_tuples:
+            line_group, direction = line_dir
+            unique_values.append([tuple(line_group), direction])
 
     # Need of combining groups with majority shared lines
     i = 0
@@ -208,6 +219,40 @@ def finalize_groups(group_dict, lines):
         i += 1
 
     return unique_values
+
+
+def vp_by_direction(intersection, wanted_dir, dim):
+    indices = set()
+    for j, vp in enumerate(intersection):
+        sect, direction = vp
+        if i == j:
+            continue
+        # How an image works is, even negative is considered outside of image
+        # Checks if the vanish point is outside 3 times the dimensions of the image
+        if ((sect is None or
+                 (len(sect) == 2 and
+                      (abs(sect[0]) > (3 * dim) and abs(sect[1]) > (3 * dim)) or
+                      (sect[0] < (3 * -dim) and sect[1] < (3 * -dim))
+                 )
+            ) and
+            direction == wanted_dir):
+            # Lines need to have same direction VPs to be accepted
+            # Lines can only form two VPs
+            indices.add(j)
+    # Add own line to all groups
+    for key in good_vps_index:
+        good_vps_index[key].add(i)
+    # near parallel lines were found
+    # key is direction, value if indexes of lines that also also vps infinitely in that direction
+    for key, value in good_vps_index.items():
+        if len(value) >= min_needed:
+            escape = True
+            line_group = []
+            for index in value:
+                line_group.append(index)
+            good_lines[i] = (line_group, key)
+        if escape:
+            break
 
 
 def has_vanishing_point(lines, image_shape):
@@ -233,31 +278,24 @@ def has_vanishing_point(lines, image_shape):
     # If there are 4 or more VPs that are none or extremely outside the image
     # We can consider those lines good
     min_needed = 4
-    used = set()
     good_lines = {}
     shared_vp_lines = []
-    priority_directions = {0, 45, 90, 135, 180, 225, 270, 315}
     for i, line_vp in enumerate(vp_list):
-        # Line is already used, don't search again
-        if i in used:
-            continue
         good_vps_index = {}
         escape = False
         """
         This section is spilt into two sections:
         1) Common vanishing point thats nears infinite (3 * dimensions of image)
         2) Common intersection AREA
+        
+        Idea of using frozen set so less duplicate vp cluster of lines are formed
         """
         for j, vp in enumerate(line_vp):
             sect, direction = vp
             if i == j:
                 continue
-            # How an image works is, even negative is considered outside of image
-            # Checks if the vanish point is outside 3 times the dimensions of the image
-            if (sect is None or
-               (len(sect) == 2 and abs(sect[0]) > (3 * w) and abs(sect[1]) > (3 * h))):
-                # Lines need to have same direction VPs to be accepted
-                # Lines can only form two VPs
+            if sect is None:
+                # Add to VP given direction
                 good_vps_index.setdefault(direction, {j}).add(j)
         # Add own line to all groups
         for key in good_vps_index:
@@ -266,11 +304,8 @@ def has_vanishing_point(lines, image_shape):
         # key is direction, value if indexes of lines that also also vps infinitely in that direction
         for key, value in good_vps_index.items():
             if len(value) >= min_needed:
-                escape = True
-                line_group = []
-                for index in value:
-                    line_group.append(index)
-                good_lines[i] = (line_group, key)
+                line_group = frozenset(value)
+                good_lines.setdefault(i, set([(line_group, key)])).add((line_group, key))
             if escape:
                 break
 
@@ -282,11 +317,11 @@ def has_vanishing_point(lines, image_shape):
                 continue
             if len(results) < 3 or len(results) > 10:
                 continue
+            line_group = frozenset(results)
             # Get direction by most counted theta, (majority is better)
             theta_to_dir = [fg.snap_to_cardinal_diagonal(np.rad2deg(lines[x][1])) for x in results]
             dir_counter = Counter(theta_to_dir)
             most_common_dir, _ = dir_counter.most_common(1)[0]
-            used.add(index for index in results)
-            good_lines[i] = (results, most_common_dir)
+            good_lines.setdefault(i, set([(line_group, most_common_dir)])).add((line_group, most_common_dir))
 
     return finalize_groups(good_lines, lines)

@@ -33,6 +33,33 @@ def snap_to_cardinal_diagonal(angle, cardinal_threshold=15):
     return closest_target
 
 
+def vp_direction(angle, cardinal_threshold=15):
+    """
+    Improved version of snap_to_cardinal_diagonal
+    Snap an angle to directions that matter chessboard orientation wise
+    """
+    # Target angles: cardinal and diagonal directions
+    targets = [0, 45, 90, 270, 315]
+
+    # Find the target with minimum distance
+    min_distance = float('inf')
+    closest_target = 0
+    got_angle = (angle + 180) % 360 if angle > 90 else angle
+
+    for i, target in enumerate(targets):
+        # Calculate distance considering circular nature of angles
+        distance = min(abs(got_angle - target), 360 - abs(got_angle - target))
+
+        if distance < min_distance:
+            # cardinal degrees are snapped on when they're really CLOSE
+            if i % 2 == 0 and distance > cardinal_threshold:
+                continue
+            min_distance = distance
+            closest_target = target
+
+    return closest_target
+
+
 def intersection_polar_lines(line1, line2, need_dir=False, eps=1e-6):
     """
     Packed line = [[rho, theta]]

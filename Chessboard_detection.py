@@ -104,7 +104,6 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=4):
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
     lines = ht.unpack_hough(cv2.HoughLines(e, 1, 0.005, threshold=threshold))
-    # lines = [[abs(rho), theta] for rho, theta in lines]
     lines = fg.filter_similar_lines(lines, image_shape)
     if corners is not None:
         lines = hcd.filter_hough_lines_by_corners(lines, corners, min_gap)
@@ -121,7 +120,7 @@ def cluster_lines(image, lines, gap_eps):
     :return:
     """
 
-    temp = vp.has_vanishing_point(vp_cluster, image.shape[:2])
+    temp = vp.has_vanishing_point(lines, image.shape[:2])
 
     final_clusters = []
     for group in temp:
@@ -298,12 +297,14 @@ def detect_chessboard(image_name, thres_config):
                              mask,
                              3)
 
-    find_exact_line(image, [], None, corners, False)
 
     # Rounds up due to having extremely long decimals
     lines = [[round(rho, 3), round(theta, 4)] for rho, theta in lines]
 
-    find_exact_line(image, lines, 0, corners=corners, green=False)
+    lines = sorted(lines, key=lambda x: x[1])
+    # for i in range(len(lines)):
+    #     print(i, lines[i])
+    #     find_exact_line(image, lines, i, corners=corners, green=True)
     print("Finding lines")
     for x, y in corners:
         cv2.circle(image, (x, y), radius=3, color=(255,0,0), thickness=-1)

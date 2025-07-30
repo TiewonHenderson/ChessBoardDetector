@@ -27,6 +27,16 @@ def put_lines(lines, image, color, thickness=2):
             cv2.line(image, points[0], points[1], color=color, thickness=thickness)
 
 
+def line_midpoint(line, image_shape):
+    """
+    To-Do
+    :param line:
+    :param image_shape:
+    :return:
+    """
+    print("x")
+
+
 def mean_lines(line1, line2):
 
     """GPT suggested to double theta then use trig functions to get circular theta means"""

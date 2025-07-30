@@ -70,7 +70,7 @@ def remove_outlier_away(interval, lines, threshold=0.05, mad_thres=2.5):
 
         if t1 - t2 < -threshold:
             # if end, its most likely last line thats bad
-            if i== len(rep_lines) - 1:
+            if i == len(rep_lines) - 1:
                 prune.append(i)
 
             # if start, its most likely first line thats bad, but check neighbor
@@ -238,3 +238,6 @@ def remove_outlier_norm(interval, lines, direction, threshold=0.5, deviation=3):
 
     # Finalize lines, we got best fit for each step, combine to one line
     return finalize_lines(final_indices, lines)
+
+
+def brute_force_find():
