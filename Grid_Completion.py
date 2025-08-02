@@ -5,6 +5,27 @@ from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import filter_grids as fg
 
 
+def cv_check_grid(group1, group2):
+    """
+    Scoring:
+    1) Gap average in group1 and group2 is relatively the same
+    2) Evenly spaced gap between each intersection
+    3) Amount of lines
+
+
+    :param group1:
+    :param group2:
+    :return:
+    """
+    # Intersection matrix
+    sect_matrix = []
+    # group 2 would be column, group 1 would be rows
+    for j, line_j in enumerate(group2):
+        sect_matrix.append([])
+        for line_i in group1:
+            sect, _ = intersection_polar_lines(line_i, line_j)
+            sect_matrix[j].append(sect)
+
 def insert_dummy_lines(groups):
     """
     Currently doesn't extend with the original lines

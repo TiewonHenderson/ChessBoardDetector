@@ -3,6 +3,7 @@ import math
 import cv2
 import numpy as np
 from ChessBoardDetector import filter_grids as fg
+from ChessBoardDetector import Grid_square_detection as gsd
 from ChessBoardDetector import cv_filter_groups as cvfg
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
@@ -99,7 +100,7 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=4):
     """
     e = edges.copy()
     height, width = image_shape
-    min_gap = 0.0132 * height
+    min_gap = 0.0264 * height
     if mask is not None:
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
@@ -162,7 +163,6 @@ def cluster_lines(image, lines, gap_eps):
 
 def check_all_grids(image, cluster_list, corners):
     """
-
     :param image:
     :param cluster_list:
     :param corners:
@@ -174,21 +174,19 @@ def check_all_grids(image, cluster_list, corners):
     Brute force check each cluster conditions stated in filter_grids.check_grid_like() header
     each cluster is then combined and a score is saved corresponding to their indices
 
-    cluster_list = 4d array
+    cluster_list = 3d array
     Each cluster stores similar theta groups that are stored in list of similar gaps by rho
     """
     for i in range(1, len(cluster_list)):
         c1 = cluster_list[i - 1]
-        for g1 in c1:
-            j = i
-            while j < len(cluster_list):
-                c2 = cluster_list[j]
-                for g2 in c2:
-                    score, intersect_list = fg.check_grid_like(g1, g2, image.shape, corners)
-                    clusters.append([g1.copy()])
-                    clusters[-1].append(g2.copy())
-                    scores.append(score)
-                    j += 1
+        j = i
+        while j < len(cluster_list):
+            c2 = cluster_list[j]
+            score, intersect_list = gsd.relative_grid_check(c1, c2, image.shape, corners)
+            clusters.append(c1.copy())
+            clusters[-1].extend(c2.copy())
+            scores.append(score)
+            j += 1
     return clusters, scores
 
 
@@ -263,7 +261,7 @@ def detect_chessboard(image_name, thres_config):
     if origin_img is None:
         origin_img = image
     height, width, _ = image.shape
-    min_gap = 0.0132 * height
+    min_gap = 0.0264 * height
 
     # Epsilon list (suggested by GPT and tested)
     image_diagonal = np.hypot(width, height)
@@ -305,6 +303,7 @@ def detect_chessboard(image_name, thres_config):
     # for i in range(len(lines)):
     #     print(i, lines[i])
     #     find_exact_line(image, lines, i, corners=corners, green=True)
+
     print("Finding lines")
     for x, y in corners:
         cv2.circle(image, (x, y), radius=3, color=(255,0,0), thickness=-1)
@@ -313,7 +312,15 @@ def detect_chessboard(image_name, thres_config):
         return False
     clusters = cluster_lines(image, lines, gap_eps)
 
+    final_lines, scores = check_all_grids(image, clusters, corners)
+    # for i, x in enumerate(final_lines):
+    #     print(x)
+    #     print("score", scores[i])
+    #     find_exact_line(image, x, 0, corners=corners, green=False)
 
+    max_index = scores.index(max(scores))
+    print("best grid LOL")
+    find_exact_line(image, final_lines[max_index], 0, corners=corners, green=False)
 
 def main():
     easy = ["Taken_Photos/left,25angle.png",
@@ -360,8 +367,8 @@ def main():
     # for j in range(len(medium)):
     #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
     #     print('done: ', i)
-    for j in range(len(hard)):
-        detect_chessboard(medium[j], thres_config)
+    for j in range(len(test1)):
+        detect_chessboard(test1[j], thres_config)
 
 
 if __name__ == "__main__":

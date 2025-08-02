@@ -39,7 +39,7 @@ def vp_direction(angle, cardinal_threshold=15):
     Snap an angle to directions that matter chessboard orientation wise
     """
     # Target angles: cardinal and diagonal directions
-    targets = [0, 45, 90, 270, 315]
+    targets = [0, 45, 90, 315, 270]
 
     # Find the target with minimum distance
     min_distance = float('inf')
@@ -300,6 +300,9 @@ def filter_similar_lines(lines, image_shape):
 
 def check_grid_like(group1, group2, image_shape=None, corners=[]):
     """
+    OLD FUNCTION OF SCORING GRID LIKE:
+    works best with top down view, and strict corner view
+
     Weight cases:
     Evenly spaced intersections = 30/100
     High ratio of intersections being corners = 30/100
@@ -462,10 +465,3 @@ def check_grid_like(group1, group2, image_shape=None, corners=[]):
     # print("Amount of lines: ", total_lines)
     print("Final score: ", score, "/ 100")
     return score, intersection_list
-
-
-def sim_inserted_lines():
-    """
-    Given a sufficient score
-    :return:
-    """

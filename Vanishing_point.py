@@ -135,35 +135,33 @@ def get_all_intersections(lines, image_shape):
     while i < len(lines):
         rho, theta = lines[i]
         j = i + 1
+        # Reaches itself first, append nothing
+        vp_list[i].append(([], None))
         while j < len(lines):
-            if i != j:
-                #intersection
-                sect, direction = fg.intersection_polar_lines(lines[i],
-                                                              lines[j],
-                                                              need_dir=True)
-                if sect is not None:
-                    # If vp is within the center, that makes no sense, don't append that
-                    if center[0] < sect[0] < center[1] and center[0] < sect[1] < center[1]:
-                        vp_list[i].append(([], None))
-                        vp_list[j].append(([], None))
-                        j += 1
-                        continue
-                    # Goes far outside the image, consider as inf VP
-                    dist_to_mid_x = abs(sect[0] - dim / 2)
-                    dist_to_mid_y = abs(sect[1] - dim / 2)
-                    if dist_to_mid_x > (3 * dim) or dist_to_mid_y > (3 * dim):
-                        vp_list[i].append((None, direction))
-                        vp_list[j].append((None, direction))
-                        j += 1
-                        continue
-                vp_list[i].append((sect, direction))
-                vp_list[j].append((sect, direction))
-            else:
-                # Append nothing for self lines
-                vp_list[i].append(([], None))
-                vp_list[j].append(([], None))
+            #intersection
+            sect, direction = fg.intersection_polar_lines(lines[i],
+                                                          lines[j],
+                                                          need_dir=True)
+            if sect is not None:
+                # If vp is within the center, that makes no sense, don't append that
+                if center[0] < sect[0] < center[1] and center[0] < sect[1] < center[1]:
+                    vp_list[i].append(([], None))
+                    vp_list[j].append(([], None))
+                    j += 1
+                    continue
+                # Goes far outside the image, consider as inf VP
+                dist_to_mid_x = abs(sect[0] - dim / 2)
+                dist_to_mid_y = abs(sect[1] - dim / 2)
+                if dist_to_mid_x > dim or dist_to_mid_y > dim:
+                    vp_list[i].append((None, direction))
+                    vp_list[j].append((None, direction))
+                    j += 1
+                    continue
+            vp_list[i].append((sect, direction))
+            vp_list[j].append((sect, direction))
             j += 1
         i += 1
+
     return vp_list
 
 
