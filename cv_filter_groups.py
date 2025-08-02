@@ -170,29 +170,22 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
     mean = np.mean(np.array(within_thres_gaps))
     gap_stats = (med, mean, mad, std_dev)
 
-
-    copy_line = lines.copy()
-    copy_line.append(perd_line)
-    print("sect_list", sect_list)
-    print("gap_list", within_thres_gaps)
-    print("lines", lines)
-    print("stats", gap_stats)
-    print("min, max", min_gap, max_gap)
-    cd.find_exact_line(image, copy_line, index=-1, green=True)
+    # copy_line = lines.copy()
+    # copy_line.append(perd_line)
+    # print("sect_list", sect_list)
+    # print("gap_list", within_thres_gaps)
+    # print("lines", lines)
+    # print("stats", gap_stats)
+    # print("min, max", min_gap, max_gap)
+    # cd.find_exact_line(image, copy_line, index=-1, green=True)
 
     # Only checks biggest interval
     intervals = max(get_intervals(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
     if len(intervals) >= 2:
         print("intervals", intervals)
-        got_lines = None
-        if direction == 0 or direction == 180:
-            got_lines = ro.remove_outlier_away(intervals, lines)
-        elif direction == 90 or direction == 270:
-            got_lines = ro.remove_outlier_parallel(intervals, lines)
-        else:
-            got_lines = ro.remove_outlier_norm(intervals, lines, direction)
+        got_lines = ro.brute_force_find(intervals, lines, direction)
 
-        if len(got_lines) == 0:
+        if got_lines is None or len(got_lines) < 1:
             return None, None
         # With removed lines, we get the new average direction by new thetas
         theta_to_dir = [fg.snap_to_cardinal_diagonal(np.rad2deg(l[1])) for l in got_lines]

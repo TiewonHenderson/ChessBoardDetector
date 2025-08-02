@@ -15,7 +15,110 @@ def get_min_max_med_theta(indices, lines):
     if indices_len == 0:
         return None, None
     thetas = sorted([(j, lines[j][1]) for j in indices], key=lambda x: x[1])
-    return (thetas[0], thetas[-1], thetas[len(thetas) / 2])
+    return (thetas[0], thetas[-1], thetas[len(thetas) // 2])
+
+
+def dp_find_longest_chain(interval, lines, threshold=0.05):
+    n = len(interval)
+    thetas = [get_min_max_med_theta(indices, lines) for indices in interval]
+    """
+    Quick GPT implemention using DP of find_longest_chain
+    
+    dp represents the len that index can create
+    prev represents the last last index that represent the previous element as a chain
+    
+    so max(dp) index -> prev index, loop back through corresponding prev index's elements
+    compare_type:
+    False = med compare med, True = max > min
+    """
+    prev = [-1] * n
+    dp = [1] * n
+    compare_type = [False] * n
+
+    for i in range(n):      # i shows the current items
+        min_i, max_i, med_i = thetas[i]
+        for j in range(i):  # j is the previous elements
+            min_j, max_j, med_j = thetas[j]
+            if med_j[-1] - min_i[-1] > -threshold and dp[j] + 1 > dp[i]:
+                dp[i] = dp[j] + 1
+                prev[i] = j
+                compare_type[i] = False
+            elif min_j[-1] - max_i[-1] > -threshold and dp[j] + 1 > dp[i]:
+                dp[i] = dp[j] + 1
+                prev[i] = j
+                compare_type[i] = True
+
+    # Reconstruct the longest decreasing chain
+    max_len = max(dp)
+    end_idx = dp.index(max_len)
+    chain = []
+    add_max = False
+    while end_idx != -1:
+        # True means add min, then max (overrides adding median)
+        min_theta, max_theta, med_theta = get_min_max_med_theta(interval[end_idx], lines)
+        if add_max:
+            # first element gets index of lines itself
+            chain.append(max_theta[0])
+            add_max = False
+        elif compare_type[end_idx]:
+            chain.append(min_theta[0])
+            add_max = True
+        else:
+            chain.append(med_theta[0])
+        end_idx = prev[end_idx]
+
+    return chain[::-1]  # reverse to get correct order
+
+
+def find_longest_chain(interval, lines, threshold=0.05):
+    """
+    TO-DO, implement memoization to search below, Bottom up prob works
+
+    1) First DP searches through interval to get long chains of all thetas almosts always decreasing
+    :param interval:
+    :param lines:
+    :param threshold:
+    :return:
+    """
+    chains = set()
+    """
+    i represents the starting index of the chains
+    """
+    for i, indices in enumerate(interval):
+        curr_chain = []
+        add = False
+        i_thetas = None
+        for k in range(i + 1, len(interval)):
+            if len(curr_chain) == 0:
+                # 0 = min, 1 = max, 2/-1 = med
+                i_thetas = get_min_max_med_theta(indices, lines)
+            else:
+                # Fakes having a max to avoid out of bounds
+                i_thetas = (curr_chain[-1], curr_chain[-1])
+
+            # Check med difference, then max difference if not within threshold
+            # (index, theta) format
+            k_thetas = get_min_max_med_theta(interval[k], lines)
+            k_med = k_thetas[-1][-1]
+            k_min = k_thetas[0][-1]
+            k_max = k_thetas[1][-1]
+
+            # add used to prevent duplicate adds
+            if i_thetas[-1][-1] - k_med > -threshold:
+                if not add:
+                    curr_chain.append(i_thetas[-1])
+                curr_chain.append(k_thetas[-1])
+                add = True
+            elif i_thetas[1][-1] - k_min > -threshold:
+                if not add:
+                    curr_chain.append(i_thetas[1])
+                curr_chain.append(k_thetas[0])
+                add = True
+            else:
+                add = False
+        chains.add(tuple(curr_chain))
+
+    return max(chains, key=len)
 
 
 def finalize_lines(final_indices, lines):
@@ -170,7 +273,7 @@ def remove_outlier_parallel(interval, lines, threshold=0.02):
     return finalize_lines(final_indices, lines)
 
 
-def remove_outlier_norm(interval, lines, direction, threshold=0.5, deviation=3):
+def remove_outlier_norm(interval, lines, direction, threshold=0.05, deviation=3):
     """
     Using the direction of the group of lines' VP, we should expect some behaviors.
     Theta trends cannot be used for vanish points going towards 0 and 180
@@ -226,8 +329,6 @@ def remove_outlier_norm(interval, lines, direction, threshold=0.5, deviation=3):
 
         prev_change saves to med, NOW next theta change must exceed or be equal to it
         """
-        print(prev_change)
-        print(theta_diffs)
         if len(theta_diffs) == 0:
             # No theta_diff that suffices, skip and see if it fits forward
             prev_miss += 1
@@ -252,7 +353,7 @@ def remove_outlier_norm(interval, lines, direction, threshold=0.5, deviation=3):
     return finalize_lines(final_indices, lines)
 
 
-def brute_force_find(interval, lines, direction, threshold=0.5, deviation=3):
+def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
     """
     Uses a brute force chaining algorithm in order to find the longest chain of lines that suffices
     the expected behavior given the direction by degree
@@ -266,91 +367,85 @@ def brute_force_find(interval, lines, direction, threshold=0.5, deviation=3):
     :return:
     """
 
+    """
+    45, 225: Decreasing theta overall, so differences are positive
+    Derivative of theta also decreases
 
+    135, 315: Decreasing theta overall, so differences are positive
+    Derivative of theta also decreases
+    """
     decreasing_theta = {45, 135, 225, 315}
-    # 45, 225: Decreasing theta overall, so differences are positive
-    # Derivative of theta also decreases
 
-    # 135, 315: Decreasing theta overall, so differences are positive
-    # Derivative of theta also decreases
+    # Curve fit functions
+    def arctan_model(x, A, B, C, D):
+        # Generated by GPT, arctan function fit
+        return A * np.arctan(B * x + C) + D
+    def linear(x, a, b):
+        return a * x + b
+    def quadratic(x, a, b, c):
+        return a * x ** 2 + b * x + c
 
-    if direction in decreasing_theta:
+    lines_c = lines
+    if direction == 0 or direction == 180:
+        lines_c = [(rho, (theta + np.pi/4) % np.pi) for rho, theta in lines]
+
+    # Longest sequence of similar or decreasing theta
+    max_chain = dp_find_longest_chain(interval, lines_c, threshold)
+    if len(max_chain) < 3:
+        return [lines[i] for i in max_chain]
+    x = np.arange(len(max_chain))
+    y = np.array([lines[i][-1] for i in max_chain])
+
+    outlier_indices = None
+    """
+    All groups runs a linear fit if the camera is top down perspective
+    90, 270 almost always fits a linear relationship if they didnt snap to decreasing_theta
+    """
+    params_linear, _ = curve_fit(linear, x, y)
+    y_pred_lin = linear(x, *params_linear)
+    resid_lin = np.abs(y - y_pred_lin)
+    residuals = resid_lin
+    if direction in decreasing_theta and len(max_chain) >= 4:
         """
-        TO-DO, implement memoization to search below
-        
-        1) First DP searches through interval to get long chains of all thetas almosts always decreasing
-        2) Curve fit an arctan function and see which thetas fit best
+        Curve fit an arctan function for persepctive skew cases
         """
-        chains = set()
-        for i, indices in enumerate(interval):
-            curr_chain = []
-            add = False
-            i_thetas = None
-            if len(curr_chain) == 0:
-                # 0 = min, 1 = max, 2/-1 = med
-                i_thetas = get_min_max_med_theta(indices, lines)
-            else:
-                # Fakes having a max to avoid out of bounds
-                i_thetas = ((curr_chain[-1]), (curr_chain[-1]))
-            k = i + 1
-            while k < len(interval):
-                # Check med difference, then max difference if not within threshold
-                # (index, theta) format
-                k_thetas = get_min_max_med_theta(interval[k], lines)
-
-                # add used to prevent duplicate adds
-                if i_thetas[-1][-1] - k_thetas[-1][-1] > -threshold:
-                    if not add:
-                        curr_chain.append(i_thetas[-1][-1])
-                    curr_chain.append(k_thetas[-1][-1])
-                    add = True
-                elif i_thetas[1][-1] - k_thetas[0][-1] > -threshold:
-                    if not add:
-                        curr_chain.append(i_thetas[1][-1])
-                    curr_chain.append(k_thetas[0][-1])
-                    add = True
-                else:
-                    add = False
-                k += 1
-            chains.add(tuple(curr_chain))
-
-        def arctan_model(x, A, B, C, D):
-            # Generated by GPT, arctan function fit
-            return A * np.arctan(B * x + C) + D
-
-        max_chain = max(chains, key=len)
-        x = np.arange(len(max_chain))
-        y = np.array(max_chain)
-
         # x is just consecutive indices y is theta
         # p0 is the init guess as param, allows faster converge according to GPT
-        params_quad, _ = curve_fit(arctan_model, x, y, p0=[30, 0.01, 0, 0])
-        y_pred = arctan_model(x, *params_quad)
+        try:
+            params_arctan, _ = curve_fit(arctan_model, x, y, p0=[1.5, 1, 0, np.pi / 2])
+            y_pred_arc = arctan_model(x, *params_arctan)
 
-        # Now it evaluates the quadratic line of x with the found coefficients
-        # We use it to compare to our theta (difference in residuals)
-        residuals = np.abs(y - y_pred)
-        mad, dist_med = cvfg.check_MAD(residuals, get_mad=True)
-        outliers = dist_med > mad_thres * mad
-        outlier_indices = np.where(outliers)[0]
+            # Compute residuals (idea by gpt over CV to determine parallel)
+            resid_arc = np.abs(y - y_pred_arc)
 
+            # Choose the better model based on sum of residuals
+            if np.sum(resid_lin) >= np.sum(resid_arc):
+                residuals = resid_arc
+        except:
+            print("No found arctan params found, default to linear")
+    elif direction == 0 or direction == 180 and len(max_chain) >= 3:
         """
-        TO-DO, make indices be kept track
+        Curve fit an quadratic function for middle vanish point cases
+        Same functionality as above but with quadratic fit
         """
-        finalize = []
-        for i in range(len(interval)):
-            if i in outlier_indices or i in prune:
-                continue
-            finalize.append(rep_lines[i])
-        return finalize
+        params_quad, _ = curve_fit(quadratic, x, y)
+        y_pred_quad = quadratic(x, *params_quad)
+        resid_quad = np.abs(y - y_pred_quad)
+        if np.sum(resid_lin) >= np.sum(resid_quad):
+            residuals = resid_quad
 
-
-
-
-
-
-
-
-
-
-
+    print("residual", residuals)
+    # Now it evaluates the quadratic line of x with the found coefficients
+    # We use it to compare to our theta (difference in residuals)
+    mad, dist_med = cvfg.check_MAD(residuals, get_mad=True)
+    outliers = dist_med > deviation * mad
+    outlier_indices = np.where(outliers)[0]
+    """
+    TO-DO, make indices be kept track
+    """
+    finalize = []
+    for i in range(len(max_chain)):
+        if i in outlier_indices:
+            continue
+        finalize.append(lines[max_chain[i]])
+    return finalize
