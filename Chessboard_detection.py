@@ -128,9 +128,9 @@ def cluster_lines(image, lines, gap_eps):
         indices, dir = group
         got_lines = [lines[i] for i in indices]
 
-        print(dir)
-        print("before")
-        find_exact_line(image, got_lines, 0, green=False)
+        # print(dir)
+        # print("before")
+        # find_exact_line(image, got_lines, 0, green=False)
         if dir == 0 or dir == 180:
             """
             Circular clustering is treated differently
@@ -154,8 +154,9 @@ def cluster_lines(image, lines, gap_eps):
         if clean_lines is None or len(clean_lines) == 0:
             continue
 
-        print("after")
-        find_exact_line(image, clean_lines, -1, green=True)
+        # print("after")
+        # find_exact_line(image, clean_lines, -1, green=True)
+
         final_clusters.append(clean_lines)
 
     return final_clusters
@@ -170,6 +171,7 @@ def check_all_grids(image, cluster_list, corners):
     """
     clusters = []
     scores = []
+    sect_list = []
     """
     Brute force check each cluster conditions stated in filter_grids.check_grid_like() header
     each cluster is then combined and a score is saved corresponding to their indices
@@ -182,12 +184,13 @@ def check_all_grids(image, cluster_list, corners):
         j = i
         while j < len(cluster_list):
             c2 = cluster_list[j]
-            score, intersect_list = gsd.relative_grid_check(c1, c2, image.shape, corners)
+            score, intersect_list = fg.check_grid_like(c1, c2, image.shape, corners)
             clusters.append(c1.copy())
             clusters[-1].extend(c2.copy())
             scores.append(score)
+            sect_list.append(intersect_list)
             j += 1
-    return clusters, scores
+    return clusters, scores, sect_list
 
 
 def present_lines(image, clusters, scores, corners):
@@ -248,6 +251,23 @@ def find_exact_line(image, lines, index, corners=[], green=True):
     ht.show_images(img)
 
 
+def show_points(points, height=1000, width=1000, image=None):
+    # Create a blank grayscale image if none is provided
+    if image is None:
+        use_image = np.zeros((height, width), dtype=np.uint8)
+    else:
+        use_image = image.copy()
+
+    # Draw each point as a small white circle
+    for x, y in points:
+        cv2.circle(use_image, (int(x), int(y)), radius=3, color=255, thickness=-1)
+
+    # Show the image
+    cv2.imshow("Verified Points", use_image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
 def detect_chessboard(image_name, thres_config):
     """
 
@@ -304,23 +324,30 @@ def detect_chessboard(image_name, thres_config):
     #     print(i, lines[i])
     #     find_exact_line(image, lines, i, corners=corners, green=True)
 
-    print("Finding lines")
-    for x, y in corners:
-        cv2.circle(image, (x, y), radius=3, color=(255,0,0), thickness=-1)
-
     if len(lines) <= 4:
         return False
     clusters = cluster_lines(image, lines, gap_eps)
 
-    final_lines, scores = check_all_grids(image, clusters, corners)
+    final_lines, scores, sect_list = check_all_grids(image, clusters, corners)
     # for i, x in enumerate(final_lines):
     #     print(x)
     #     print("score", scores[i])
     #     find_exact_line(image, x, 0, corners=corners, green=False)
+    if len(scores) > 0 and len(final_lines) > 0:
+        print("best grid found")
+        max_index = scores.index(max(scores))
+        final_lines = final_lines[max_index]
 
-    max_index = scores.index(max(scores))
-    print("best grid LOL")
-    find_exact_line(image, final_lines[max_index], 0, corners=corners, green=False)
+        # Transition from lines to corner points here
+        sect_list = sect_list[max_index]
+        flat_list = [line for sublist in sect_list for line in sublist]
+
+        verified = gc.intersect_verification(flat_list, corners)
+        show_points(verified, height, width)
+
+    else:
+        print("No found grid")
+
 
 def main():
     easy = ["Taken_Photos/left,25angle.png",
@@ -330,21 +357,24 @@ def main():
             "Taken_Photos/top,rotated.png",
             "Taken_Photos/top.png",
             "Real_Photos/Close,somewhat_angled,solid.jpg",
-            "Real_Photos/Close,somewhat_angled,solid2.jpg"]
+            "Real_Photos/Close,somewhat_angled,solid2.jpg"
+            ]
     medium = ["Taken_Photos/left,65angle.png",
               "Taken_Photos/left,random,45angle.png",
               "Taken_Photos/left,rotated,45angle.png",
               "Taken_Photos/left,rotated,random,45angle.png",
               "Real_Photos/Mid,not_angled,flat.jpeg",
               "Real_Photos/Mid,not_angled,flat2.jpg",
-              "Real_Photos/Mid,somewhat_angled,flat.png"]
+              "Real_Photos/Mid,somewhat_angled,flat.png"
+              ]
     hard = ["Taken_Photos/left,rotated,65angle.png",
             "Taken_Photos/left,rotated,random,65angle.png",
             "Real_Photos/Far,angled,solid.jpg",
             "Real_Photos/1-5.png",
             "Real_Photos/Far,somewhat_angled,flat.jpg",
             "Real_Photos/Mid,somewhat_angled,flat2.jpg",
-            "Real_Photos/Mid,very_angled,solid.jpg"]
+            "Real_Photos/Mid,very_angled,solid.jpg"
+            ]
 
     test1 = ["Taken_Photos/left,25angle.png",
             "Taken_Photos/left,random,25angle.png",

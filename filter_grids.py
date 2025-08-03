@@ -463,5 +463,5 @@ def check_grid_like(group1, group2, image_shape=None, corners=[]):
     # print("Amount of intersections: ", total_intersect)
     # print("Amount of good intersection: ", corner_intersect)
     # print("Amount of lines: ", total_lines)
-    print("Final score: ", score, "/ 100")
+    # print("Final score: ", score, "/ 100")
     return score, intersection_list

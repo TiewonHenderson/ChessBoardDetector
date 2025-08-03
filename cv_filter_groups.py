@@ -33,6 +33,7 @@ def bucket_sort(elements, threshold=0.4):
 
 def get_intervals(gap_list, gap_stats, max_gap, min_gap):
     """
+
     Function meant to detect extreme outlier gaps with mad and cv, mad
     2 std_dev away means 95%, most likely outlier
     :param gap_list:
@@ -91,6 +92,7 @@ def get_intervals(gap_list, gap_stats, max_gap, min_gap):
 
 def cv_clean_lines(lines, direction, image_shape, image=None):
     """
+
     gap and lines structure:
     lines = [0 , 1 , 2 , 3 , 4..]
     gaps = [   0,  1,  2,  3..]
@@ -144,7 +146,6 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
 
     # Gaps within the threshold to get statistics surrounding found gaps is better
     within_thres_gaps = [gap for gap in gap_list if gap >= min_gap and gap <= max_gap]
-    print("within_thres,gaps", within_thres_gaps)
     if len(within_thres_gaps) < 3:
         # If majority of the gap is bad, this group is bad
         return None, None
@@ -154,19 +155,19 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
     mean = np.mean(np.array(within_thres_gaps))
     gap_stats = (med, mean, mad, std_dev)
 
-    copy_line = lines.copy()
-    copy_line.append(perd_line)
-    print("sect_list", sect_list)
-    print("gap_list", within_thres_gaps)
-    print("lines", lines)
-    print("stats", gap_stats)
-    print("min, max", min_gap, max_gap)
-    cd.find_exact_line(image, copy_line, index=-1, green=True)
+    # copy_line = lines.copy()
+    # copy_line.append(perd_line)
+    # print("sect_list", sect_list)
+    # print("gap_list", within_thres_gaps)
+    # print("lines", lines)
+    # print("stats", gap_stats)
+    # print("min, max", min_gap, max_gap)
+    # cd.find_exact_line(image, copy_line, index=-1, green=True)
 
     # Only checks biggest interval
     intervals = max(get_intervals(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
     if len(intervals) >= 2:
-        print("intervals", intervals)
+        print(intervals)
         got_lines = ro.brute_force_find(intervals, lines, direction)
 
         if got_lines is None or len(got_lines) < 1:
@@ -260,7 +261,7 @@ def cv_clean_lines_Alt(lines, direction, image_shape, image=None):
     cd.find_exact_line(image, copy_line, index=-1, green=True)
 
     # Only checks biggest interval
-    intervals = max(get_intervals(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
+    intervals = max(get_intervals_only_overlap(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
     if len(intervals) >= 2:
         print("intervals", intervals)
         got_lines = ro.brute_force_find(intervals, lines, direction)
