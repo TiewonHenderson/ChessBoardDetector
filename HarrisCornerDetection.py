@@ -47,10 +47,13 @@ def shi_tomasi(image, ksize, min_gap, points=200):
     """
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (ksize, ksize), 1)
-    corners = cv2.goodFeaturesToTrack(blurred,
-                                      maxCorners=points,
-                                      qualityLevel=0.01,
-                                      minDistance=min_gap)
+    corners = cv2.goodFeaturesToTrack(
+                blurred,
+                maxCorners=200,
+                qualityLevel=0.1,
+                minDistance=10,
+                blockSize=5
+            )
     corners = np.intp(corners)
     xy_points = [list(pt[0]) for pt in corners]
     return xy_points

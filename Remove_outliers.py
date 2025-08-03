@@ -122,6 +122,7 @@ def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
     y_pred_lin = linear(x, *params_linear)
     resid_lin = np.abs(y - y_pred_lin)
     residuals = resid_lin
+    final_param = params_linear
     if direction in decreasing_theta and len(max_chain) >= 4:
         """
         Curve fit an arctan function for persepctive skew cases
@@ -138,6 +139,7 @@ def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
             # Choose the better model based on sum of residuals
             if np.sum(resid_lin) >= np.sum(resid_arc):
                 residuals = resid_arc
+                final_param = params_arctan
         except:
             print("No found arctan params found, default to linear")
     elif direction == 0 or direction == 180 and len(max_chain) >= 3:
@@ -150,6 +152,7 @@ def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
         resid_quad = np.abs(y - y_pred_quad)
         if np.sum(resid_lin) >= np.sum(resid_quad):
             residuals = resid_quad
+            final_param = params_quad
 
     # Now it evaluates the quadratic line of x with the found coefficients
     # We use it to compare to our theta (difference in residuals)
@@ -164,4 +167,4 @@ def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
         if i in outlier_indices:
             continue
         finalize.append(lines[max_chain[i]])
-    return finalize
+    return finalize, final_param

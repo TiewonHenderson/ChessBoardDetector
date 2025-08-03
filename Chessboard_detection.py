@@ -104,7 +104,7 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=4):
     if mask is not None:
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
-    lines = ht.unpack_hough(cv2.HoughLines(e, 1, 0.005, threshold=threshold))
+    lines = ht.unpack_hough(cv2.HoughLines(e, 1, 0.0175, threshold=threshold))
     lines = fg.filter_similar_lines(lines, image_shape)
     if corners is not None:
         lines = hcd.filter_hough_lines_by_corners(lines, corners, min_gap)
@@ -131,6 +131,7 @@ def cluster_lines(image, lines, gap_eps):
         # print(dir)
         # print("before")
         # find_exact_line(image, got_lines, 0, green=False)
+
         if dir == 0 or dir == 180:
             """
             Circular clustering is treated differently
@@ -149,7 +150,7 @@ def cluster_lines(image, lines, gap_eps):
             if len(clusters) == 0:
                 continue
             got_lines = max(fg.dbscan_cluster_lines(got_lines, eps=dir_eps[dir]).values(), key=len)
-        clean_lines, new_dir = cvfg.cv_clean_lines(got_lines, dir, image.shape[:2], image)
+        clean_lines, params, new_dir = cvfg.cv_clean_lines(got_lines, dir, image.shape[:2], image)
 
         if clean_lines is None or len(clean_lines) == 0:
             continue
@@ -157,7 +158,7 @@ def cluster_lines(image, lines, gap_eps):
         # print("after")
         # find_exact_line(image, clean_lines, -1, green=True)
 
-        final_clusters.append(clean_lines)
+        final_clusters.append((clean_lines, params, new_dir))
 
     return final_clusters
 
@@ -172,6 +173,8 @@ def check_all_grids(image, cluster_list, corners):
     clusters = []
     scores = []
     sect_list = []
+    cardinal_vertical = {0, 180}
+    cardinal_horizontal = {90, 270}
     """
     Brute force check each cluster conditions stated in filter_grids.check_grid_like() header
     each cluster is then combined and a score is saved corresponding to their indices
@@ -180,15 +183,17 @@ def check_all_grids(image, cluster_list, corners):
     Each cluster stores similar theta groups that are stored in list of similar gaps by rho
     """
     for i in range(1, len(cluster_list)):
-        c1 = cluster_list[i - 1]
+        c1, _, dir1 = cluster_list[i - 1]
         j = i
         while j < len(cluster_list):
-            c2 = cluster_list[j]
-            score, intersect_list = fg.check_grid_like(c1, c2, image.shape, corners)
-            clusters.append(c1.copy())
-            clusters[-1].extend(c2.copy())
-            scores.append(score)
-            sect_list.append(intersect_list)
+            c2, _, dir2 = cluster_list[j]
+            if (dir1 in cardinal_vertical and dir2 in cardinal_horizontal) or \
+                    (dir2 in cardinal_vertical and dir1 in cardinal_horizontal):
+                score, intersect_list = fg.check_grid_like(c1, c2, image.shape, corners)
+                clusters.append([cluster_list[i - 1]])
+                clusters[-1].append(cluster_list[j])
+                scores.append(score)
+                sect_list.append(intersect_list)
             j += 1
     return clusters, scores, sect_list
 
@@ -307,19 +312,17 @@ def detect_chessboard(image_name, thres_config):
     binary_map = np.zeros((height, width), dtype=np.uint8)
 
     for x, y in corners:
-        binary_map[int(y), int(x)] = 255  # Note: OpenCV uses (y, x) order for indexing
+        x = int(x)
+        y = int(y)
+        binary_map[y, x] = 255
 
     lines = houghLine_detect([height, width],
                              binary_map,
                              corners,
                              mask,
                              3)
-
-
-    # Rounds up due to having extremely long decimals
-    lines = [[round(rho, 3), round(theta, 4)] for rho, theta in lines]
-
-    lines = sorted(lines, key=lambda x: x[1])
+    find_exact_line(image, lines, 0, corners=corners, green=False)
+    # lines = sorted(lines, key=lambda x: x[1])
     # for i in range(len(lines)):
     #     print(i, lines[i])
     #     find_exact_line(image, lines, i, corners=corners, green=True)
@@ -329,21 +332,25 @@ def detect_chessboard(image_name, thres_config):
     clusters = cluster_lines(image, lines, gap_eps)
 
     final_lines, scores, sect_list = check_all_grids(image, clusters, corners)
-    # for i, x in enumerate(final_lines):
-    #     print(x)
-    #     print("score", scores[i])
-    #     find_exact_line(image, x, 0, corners=corners, green=False)
+
     if len(scores) > 0 and len(final_lines) > 0:
         print("best grid found")
         max_index = scores.index(max(scores))
-        final_lines = final_lines[max_index]
+        # Structured as g = (lines, params for curve fit, direction overall)
+        g1, g2 = final_lines[max_index]
+
+        print("score", scores[max_index])
+        find_exact_line(image, g1[0] + g2[0], 0, corners=corners, green=False)
 
         # Transition from lines to corner points here
         sect_list = sect_list[max_index]
+        print(sect_list)
         flat_list = [line for sublist in sect_list for line in sublist]
 
         verified = gc.intersect_verification(flat_list, corners)
         show_points(verified, height, width)
+
+
 
     else:
         print("No found grid")

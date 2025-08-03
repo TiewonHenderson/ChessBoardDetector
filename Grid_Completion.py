@@ -49,13 +49,56 @@ def intersect_verification(sect_list, corner, threshold=10):
     """
     verified = set()
     max_dist = threshold ** 2
-    for x_1, y_1 in sect_list:
+    for pt1 in sect_list:
+        if pt1 is None:
+            continue
+        x_1, y_1 = pt1
         # Use of dist^2 = (x_2 - x_1)^2 + (y_2 - y_1)^2 to avoid sqrt operations
         min_dist_pt = (sys.maxsize, None)
-        for x_2, y_2 in corner:
+        for pt2 in corner:
+            if pt2 is None:
+                continue
+            x_2, y_2 = pt2
             dist_sqre = (x_2 - x_1)**2 + (y_2 - y_1)**2
             if min_dist_pt[0] > dist_sqre:
                 min_dist_pt = (dist_sqre, [x_2, y_2])
         if min_dist_pt[0] < max_dist:
             verified.add(tuple(min_dist_pt[1]))
     return verified
+
+
+def hough_line_intersect(line, point):
+    """
+    :param line: [rho, theta]
+    :param point: [x, y]
+    :param tolerance: Represented by total pixels off to be considered intersecting a corner
+    :return: distance to consider intersect
+    """
+    rho, theta = line
+    x, y = point
+    cos_t = np.cos(theta)
+    sin_t = np.sin(theta)
+    distance = abs(x * cos_t + y * sin_t - rho)
+    return distance
+
+
+def line_interpolate_by_corner(group, corners, direction, threshold=10):
+    """
+    Interpolate lines by checking if they come close to intersecting harris corner points
+    Makes sure gap consistency is similar to those found in group 1 and 2
+    :param group:
+    :param corners:
+    :param direction:
+    :param threshold:
+    :return:
+    """
+    if 3 < len(group) < 9:
+        """
+        Applies near same logic within Remove_outliers
+        """
+        if direction == 0 or direction == 180:
+            lines_c = [(rho, (theta + np.pi / 4) % np.pi) for rho, theta in group]
+
+    return None
+
+
