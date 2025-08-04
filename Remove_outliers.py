@@ -70,6 +70,80 @@ def dp_find_longest_chain(interval, lines, threshold=0.05):
     return chain[::-1]  # reverse to get correct order
 
 
+def remove_outlier_parallel(interval, lines, threshold=0.02):
+    """
+    Theta should remain relatively the same, so rho is considered more
+    Gap should increase since its going towards the camera
+    :param interval:
+    :param lines:
+    :param threshold: Maximum allowed deviation from expected trend
+    :return:
+    """
+
+    def finalize_lines(final_indices, lines):
+        """
+        Helper function to combine all combination of indices
+        Will not append None
+        """
+        i = 0
+        finalize = []
+        while i < len(final_indices) - 1:
+            # start end index
+            s1, e1 = final_indices[i]
+            s2, e2 = final_indices[i + 1]
+            if i == 0:
+                if s1 is not None:
+                    finalize.append(lines[s1])
+            # With how lines are added, s2 is e1
+            if e1 is not None:
+                finalize.append(lines[e1])
+            elif s2 is not None:
+                finalize.append(lines[s2])
+            if i == len(final_indices) - 2:
+                if e1 is not None:
+                    finalize.append(lines[e2])
+                    break
+            i += 1
+        return finalize
+    i = 0
+    prev_change = -sys.maxsize
+    final_indices = []
+    while i < len(interval) - 1:
+        if len(final_indices) == 0:
+            lines1 = [lines[index] for index in interval[i]]
+        else:
+            lines1 = [lines[final_indices[-1][1]]]
+        lines2 = [lines[index] for index in interval[i + 1]]
+        rho_diffs = []
+        indices = []
+        for j, l1 in enumerate(lines1):
+            for k, l2 in enumerate(lines2):
+                # Check theta difference first, must be consistent
+                t_diff = abs(l1[1] - l2[1])
+                if t_diff > threshold:
+                    continue
+                rho_diffs.append(abs(l1[0] - l2[0]))
+                indices.append((interval[i][j], interval[i + 1][k]))
+        if len(rho_diffs) == 0:
+            i += 1
+            continue
+        med = np.median(np.percentile(rho_diffs, [65]))
+        """
+        Needs further on why prev_change is used here (no trends)
+        """
+        if med >= prev_change:
+            closest_index = min(range(len(rho_diffs)), key=lambda i: abs(rho_diffs[i] - med))
+            final_indices.append(indices[closest_index])
+            prev_change = med * (1 - threshold)
+        else:
+            # Fail safe
+            final_indices.append(indices[0])
+        i += 1
+
+    # Finalize lines, we got best fit for each step, combine to one line
+    return finalize_lines(final_indices, lines)
+
+
 def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
     """
     Uses a brute force chaining algorithm in order to find the longest chain of lines that suffices
@@ -167,4 +241,4 @@ def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
         if i in outlier_indices:
             continue
         finalize.append(lines[max_chain[i]])
-    return finalize, final_param
+    return finalize

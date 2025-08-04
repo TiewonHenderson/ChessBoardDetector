@@ -2,6 +2,7 @@ import sys
 import cv2
 import numpy as np
 from ChessBoardDetector import filter_grids as fg
+from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import Chessboard_detection as cd
 from ChessBoardDetector import Remove_outliers as ro
 from math import sin,cos
@@ -29,6 +30,60 @@ def bucket_sort(elements, threshold=0.4):
         else:
             bucket[round(float(x), 5)] = 1
     return bucket
+
+
+def overlapping_by_corners(line, corners):
+    """
+    Alternative way to detect overlapping lines by the shared corner intersection
+    :param line:
+    :param corners:
+    :return:
+    """
+    hits = set()
+    for point in corners:
+        if hcd.hough_line_intersect(line, point):
+            hits.add(tuple(point))
+    return hits
+
+
+def group_overlap(lines, corners, image_shape, threshold=2):
+    """
+    Assumes lines is sorted by the near perpendicular line intersection
+    :param lines:
+    :param corners:
+    :param image_shape:
+    :param threshold:
+    :return:
+    """
+    dim, _ = image_shape
+    rho_eps = 0.01 * dim
+    theta_eps = 0.0175 * threshold
+    used = set()
+    intervals = []
+    for i in range(len(lines)):
+        if i in used:
+            continue
+        points = overlapping_by_corners(lines[i], corners)
+        if points is None or len(points) == 0:
+            # Near impossible case, maybe threshold is too low or something
+            continue
+        intervals.append([i])
+        used.add(i)
+        # Iterate through consecutive lines in order to see shared intersecting corner
+        for j in range(i + 1, len(lines)):
+            if j in used:
+                continue
+            count_same = 0
+            for pt in points:
+                if hcd.hough_line_intersect(lines[j], pt):
+                    count_same += 1
+            # Good enough conditions to consider as overlapping
+            # Very hard to get different lines with 4 different points that weren't clustered together
+            if count_same >= 4 or count_same/len(points) or \
+               count_same >= 2 and fg.is_similar_lines(lines[i], lines[j], rho_eps, theta_eps):
+                intervals[-1].append(j)
+                used.add(j)
+    return intervals
 
 
 def get_intervals(gap_list, gap_stats, max_gap, min_gap):
@@ -90,8 +145,10 @@ def get_intervals(gap_list, gap_stats, max_gap, min_gap):
     return intervals
 
 
-def cv_clean_lines(lines, direction, image_shape, image=None):
+def cv_clean_lines(lines, corners, direction, image_shape, image=None):
     """
+    TO-DO:
+    ADAPT MY FUNCTION TO PARALLEL LINES BETTER!!!
 
     gap and lines structure:
     lines = [0 , 1 , 2 , 3 , 4..]
@@ -125,7 +182,7 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
 
     # Not enough lines to be considered a grid
     if len(lines) < 4:
-        return None, None, None
+        return None, None
     h, w = image_shape
     min_gap = 0.0264 * h
     max_gap = 0.15 * h
@@ -146,9 +203,14 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
 
     # Gaps within the threshold to get statistics surrounding found gaps is better
     within_thres_gaps = [gap for gap in gap_list if gap >= min_gap and gap <= max_gap]
+    thetas = [line_i[1] for line_i in lines]
+    is_parallel = False
+    if np.std(thetas) <= 0.1:
+        # Temporary ~5 degree difference is considered parallel
+        is_parallel = True
     if len(within_thres_gaps) < 3:
         # If majority of the gap is bad, this group is bad
-        return None, None, None
+        return None, None
     med = np.median(within_thres_gaps)
     mad, _ = check_MAD(within_thres_gaps, get_mad=True)
     std_dev = np.std(np.array(within_thres_gaps))
@@ -165,12 +227,16 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
     # cd.find_exact_line(image, copy_line, index=-1, green=True)
 
     # Only checks biggest interval
-    intervals = max(get_intervals(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
+    intervals = group_overlap(lines, corners, image_shape)
+    # intervals = max(get_intervals(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
     if len(intervals) >= 2:
-        got_lines, param = ro.brute_force_find(intervals, lines, direction)
+        if is_parallel:
+            got_lines = ro.remove_outlier_parallel(intervals, lines)
+        else:
+            got_lines = ro.brute_force_find(intervals, lines, direction)
 
         if got_lines is None or len(got_lines) <= 2:
-            return None, None, None
+            return None, None
         # With removed lines, we get the new average direction by new thetas
 
         theta_to_dir = [fg.snap_to_cardinal_diagonal(np.rad2deg(l[1])) for l in got_lines]
@@ -180,10 +246,10 @@ def cv_clean_lines(lines, direction, image_shape, image=None):
         # print("got lines", got_lines, "\nnew dir", most_common_dir)
         # cd.find_exact_line(image, got_lines, index=-1, green=False)
 
-        return got_lines, param, most_common_dir
+        return got_lines, most_common_dir
 
     print("Filtered out all important lines, NO group found")
-    return None, None, None
+    return None, None
 
 
 def check_MAD(elements, std_dev=3.5, get_mad=False, get_score=False):

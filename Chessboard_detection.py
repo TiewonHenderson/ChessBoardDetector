@@ -2,6 +2,7 @@ import sys
 import math
 import cv2
 import numpy as np
+from collections import Counter
 from ChessBoardDetector import filter_grids as fg
 from ChessBoardDetector import Grid_square_detection as gsd
 from ChessBoardDetector import cv_filter_groups as cvfg
@@ -111,7 +112,7 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=4):
     return lines
 
 
-def cluster_lines(image, lines, gap_eps):
+def cluster_lines(image, lines, corners, gap_eps, corner=[]):
     """
     Clustering and filtering groups by their shared vanishing point
 
@@ -122,6 +123,15 @@ def cluster_lines(image, lines, gap_eps):
     """
 
     temp = vp.has_vanishing_point(lines, image.shape[:2])
+    # Added a clustering find as well with vp implementation
+    clusters = fg.dbscan_cluster_lines(lines, indices=True, eps=0.1)
+    for key in clusters:
+        if len(clusters[key]) >= 4:
+            clustered_lines = [lines[i] for i in clusters[key]]
+            theta_to_dir = [fg.snap_to_cardinal_diagonal(np.rad2deg(l[1])) for l in clustered_lines]
+            dir_counter = Counter(theta_to_dir)
+            most_common_dir, _ = dir_counter.most_common(1)[0]
+            temp.append((clusters[key], most_common_dir))
 
     final_clusters = []
     for group in temp:
@@ -132,25 +142,26 @@ def cluster_lines(image, lines, gap_eps):
         # print("before")
         # find_exact_line(image, got_lines, 0, green=False)
 
-        if dir == 0 or dir == 180:
-            """
-            Circular clustering is treated differently
-            BUT since we know all the lines share the vp on top / bottom
-            (Bottom doesn't really make sense camera wised, we'll focus)
-            We really only care about theta around [0, pi/4] and [3pi/4, pi]
-            """
-            copied_lines = [[rho, theta + np.pi / 2] for rho, theta in got_lines]
-            clusters = fg.dbscan_cluster_lines(copied_lines, indices=True, eps=dir_eps[dir]).values()
-            if len(clusters) == 0:
-                continue
-            copied_lines = max(clusters, key=len)
-            got_lines = [got_lines[i] for i in copied_lines]
-        else:
-            clusters = fg.dbscan_cluster_lines(got_lines).values()
-            if len(clusters) == 0:
-                continue
-            got_lines = max(fg.dbscan_cluster_lines(got_lines, eps=dir_eps[dir]).values(), key=len)
-        clean_lines, params, new_dir = cvfg.cv_clean_lines(got_lines, dir, image.shape[:2], image)
+        # if dir == 0 or dir == 180:
+        #     """
+        #     Circular clustering is treated differently
+        #     BUT since we know all the lines share the vp on top / bottom
+        #     (Bottom doesn't really make sense camera wised, we'll focus)
+        #     We really only care about theta around [0, pi/4] and [3pi/4, pi]
+        #     """
+        #     copied_lines = [[rho, theta + np.pi / 2] for rho, theta in got_lines]
+        #     clusters = fg.dbscan_cluster_lines(copied_lines, indices=True, eps=dir_eps[dir]).values()
+        #     if len(clusters) == 0:
+        #         continue
+        #     copied_lines = max(clusters, key=len)
+        #     got_lines = [got_lines[i] for i in copied_lines]
+        # else:
+        #     clusters = fg.dbscan_cluster_lines(got_lines).values()
+        #     if len(clusters) == 0:
+        #         continue
+        #     got_lines = max(fg.dbscan_cluster_lines(got_lines, eps=dir_eps[dir]).values(), key=len)
+
+        clean_lines, new_dir = cvfg.cv_clean_lines(got_lines, corners, dir, image.shape[:2], image)
 
         if clean_lines is None or len(clean_lines) == 0:
             continue
@@ -158,7 +169,7 @@ def cluster_lines(image, lines, gap_eps):
         # print("after")
         # find_exact_line(image, clean_lines, -1, green=True)
 
-        final_clusters.append((clean_lines, params, new_dir))
+        final_clusters.append((clean_lines, new_dir))
 
     return final_clusters
 
@@ -183,17 +194,16 @@ def check_all_grids(image, cluster_list, corners):
     Each cluster stores similar theta groups that are stored in list of similar gaps by rho
     """
     for i in range(1, len(cluster_list)):
-        c1, _, dir1 = cluster_list[i - 1]
+        c1, dir1 = cluster_list[i - 1]
         j = i
         while j < len(cluster_list):
-            c2, _, dir2 = cluster_list[j]
-            if (dir1 in cardinal_vertical and dir2 in cardinal_horizontal) or \
-                    (dir2 in cardinal_vertical and dir1 in cardinal_horizontal):
-                score, intersect_list = fg.check_grid_like(c1, c2, image.shape, corners)
-                clusters.append([cluster_list[i - 1]])
-                clusters[-1].append(cluster_list[j])
-                scores.append(score)
-                sect_list.append(intersect_list)
+            c2, dir2 = cluster_list[j]
+            # SHOULD HAVE CHECK BY PERPENDICULAR GROUPS, future improvement
+            score, intersect_list = fg.check_grid_like(c1, c2, image.shape, corners)
+            clusters.append([cluster_list[i - 1]])
+            clusters[-1].append(cluster_list[j])
+            scores.append(score)
+            sect_list.append(intersect_list)
             j += 1
     return clusters, scores, sect_list
 
@@ -329,7 +339,7 @@ def detect_chessboard(image_name, thres_config):
 
     if len(lines) <= 4:
         return False
-    clusters = cluster_lines(image, lines, gap_eps)
+    clusters = cluster_lines(image, lines, corners, gap_eps, corners)
 
     final_lines, scores, sect_list = check_all_grids(image, clusters, corners)
 
@@ -339,19 +349,10 @@ def detect_chessboard(image_name, thres_config):
         # Structured as g = (lines, params for curve fit, direction overall)
         g1, g2 = final_lines[max_index]
 
-        print("score", scores[max_index])
-        find_exact_line(image, g1[0] + g2[0], 0, corners=corners, green=False)
+        # print("score", scores[max_index])
+        # find_exact_line(image, g1[0] + g2[0], 0, corners=corners, green=False)
 
-        # Transition from lines to corner points here
-        sect_list = sect_list[max_index]
-        print(sect_list)
-        flat_list = [line for sublist in sect_list for line in sublist]
-
-        verified = gc.intersect_verification(flat_list, corners)
-        show_points(verified, height, width)
-
-
-
+        gc.line_interpolate(g1, g2, sect_list[max_index], corners, image=image)
     else:
         print("No found grid")
 

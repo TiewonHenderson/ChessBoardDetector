@@ -4,6 +4,7 @@ import cv2
 from scipy.spatial.distance import cdist
 from math import sin,cos
 from ChessBoardDetector import HarrisCornerDetection as hcd
+from ChessBoardDetector import Chessboard_detection as cd
 from ChessBoardDetector import HoughTransform as ht
 from ChessBoardDetector import filter_grids as fg
 from ChessBoardDetector import cv_filter_groups as cvfg
@@ -39,32 +40,38 @@ def closest_corner(corners, line):
     return top_closest
 
 
-def intersect_verification(sect_list, corner, threshold=10):
+def intersect_verification(sect_list, corner, threshold=7):
     """
     Verifies intersection if they're close enough to a corner point
     :param sect_list:
     :param corner:
-    :param threshold: 10 pixel distance is the default offset of points to be considered the same
+    :param threshold: 7 pixel distance is the default offset of points to be considered the same
     :return:
     """
     verified = set()
+    verified_indices = set()
     max_dist = threshold ** 2
-    for pt1 in sect_list:
-        if pt1 is None:
-            continue
-        x_1, y_1 = pt1
-        # Use of dist^2 = (x_2 - x_1)^2 + (y_2 - y_1)^2 to avoid sqrt operations
-        min_dist_pt = (sys.maxsize, None)
-        for pt2 in corner:
-            if pt2 is None:
+    for row in sect_list:
+        for element in row:
+            if element is None:
                 continue
-            x_2, y_2 = pt2
-            dist_sqre = (x_2 - x_1)**2 + (y_2 - y_1)**2
-            if min_dist_pt[0] > dist_sqre:
-                min_dist_pt = (dist_sqre, [x_2, y_2])
-        if min_dist_pt[0] < max_dist:
-            verified.add(tuple(min_dist_pt[1]))
-    return verified
+            indices, pt1 = element
+            x_1, y_1 = pt1
+            # Use of dist^2 = (x_2 - x_1)^2 + (y_2 - y_1)^2 to avoid sqrt operations
+            min_dist_pt = (sys.maxsize, None)
+            for pt2 in corner:
+                if pt2 is None:
+                    continue
+                x_2, y_2 = pt2
+                dist_sqre = (x_2 - x_1)**2 + (y_2 - y_1)**2
+                if min_dist_pt[0] > dist_sqre:
+                    min_dist_pt = (dist_sqre, [x_2, y_2])
+            if min_dist_pt[0] < max_dist:
+                # This stores the group number with it's corresponding index
+                for i, x in enumerate(indices):
+                    verified_indices.add((i, x))
+                verified.add(tuple(min_dist_pt[1]))
+    return verified, verified_indices
 
 
 def hough_line_intersect(line, point):
@@ -82,23 +89,87 @@ def hough_line_intersect(line, point):
     return distance
 
 
-def line_interpolate_by_corner(group, corners, direction, threshold=10):
+def get_most_common_dist(lines, min_count_threshold=1):
     """
-    Interpolate lines by checking if they come close to intersecting harris corner points
-    Makes sure gap consistency is similar to those found in group 1 and 2
-    :param group:
+
+    :param lines:
+    :return:
+    """
+    if len(lines) <= 1:
+        return None
+
+    lines_c = np.array([rho for rho, _ in lines])
+
+    # Compute all pairwise gaps between consecutive lines
+    gaps = np.diff(np.sort(lines_c))
+
+    hist, bin_edges = np.histogram(gaps, bins='auto')
+    max_count = np.max(hist)
+
+    if max_count < min_count_threshold:
+        # No dominant gap → fallback to median
+        return np.median(gaps)
+    else:
+        # Use bin center of most common gap
+        idx = np.argmax(hist)
+        most_common = (bin_edges[idx] + bin_edges[idx + 1]) / 2
+        return most_common
+
+
+def line_interpolate(group1, group2, sect_list, corners, threshold=10, image=None):
+    """
+    Interpolate lines by:
+    1) Verifying lines with valid intersection by corners
+    2) Present the corners points intersecting the lines verifed by the previous step.
+    3) Extend out until number of lines for both group reaches 9
+    :param group1:
+    :param group2:
+    :param sect_list:
     :param corners:
-    :param direction:
     :param threshold:
     :return:
     """
-    if 3 < len(group) < 9:
-        """
-        Applies near same logic within Remove_outliers
-        """
-        if direction == 0 or direction == 180:
-            lines_c = [(rho, (theta + np.pi / 4) % np.pi) for rho, theta in group]
+    if len(group1) < 2 or len(group2) < 2:
+        return None, None
 
-    return None
+    verified, lines_by_i = intersect_verification(sect_list, corners)
+    g1 = []
+    g2 = []
+    for i, line_index in lines_by_i:
+        if i == 0:
+            g1.append(group1[0][line_index])
+        else:
+            g2.append(group2[0][line_index])
+
+    if image is not None:
+        g1_copy = g1.copy()
+        g1_copy.extend(g2)
+        cd.find_exact_line(image, g1_copy, -1)
+
+    # Absolute values groups of lines for relatives location of lines
+
+    best_gap_g1 = get_most_common_dist([(abs(rho), theta) for rho, theta in g1])
+    best_gap_g2 = get_most_common_dist([(abs(rho), theta) for rho, theta in g2])
+    # First round, find all in between lines
+    if len(relative_g1) < 9:
+        for i in range(len(g1) - 1):
+            line1 = g1[i]
+            line2 = g1[i + 1]
+            between_pts = ht.points_between_lines(corners, line1, line2)
+            if len(between_pts) >= 4:
+                """
+                TO-DO, make use of a accurate most common gap function to check
+                How many lines can be interpolated between
+                """
+                rho1, rho2 = abs(line1[0]), abs(line2[0])
+                rho_diff = abs(rho1 - rho2)
+                scale = rho_diff / best_gap_g1
+                multi_scale = round(scale)
+                round_error = abs(round(scale) - scale)
+                # Temp 0.15 acceptable rounding error range, at most interpolate 2 lines
+                if round_error < 0.15 and multi_scale <= 2:
 
 
+
+
+    # Second round, find expansion lines outwards if not enough corners inbetween

@@ -115,17 +115,6 @@ def intersection_polar_lines(line1, line2, need_dir=False, eps=1e-6):
     return [round(x), round(y)]
 
 
-def normalize_theta(theta):
-    """
-    This is for clustering lines by orientation
-    This should not replace the theta value from houghline outputs!
-
-    :param theta: Theta corresponding to a detected hough line
-    :return: normalized theta would represent the orientation better
-    """
-    return theta % np.pi
-
-
 def normalize_line(line):
     """
     One of the issues of polar coordinates is it revolves around the origin
@@ -204,7 +193,7 @@ def label_to_cluster(lines, labels, indices):
     return cluster_dict
 
 
-def dbscan_cluster_lines(lines, indices=False, eps=0.02):
+def dbscan_cluster_lines(lines, indices=False, eps=0.1):
     """
         Clusters using DBSCAN, then labels each cluster by it's average theta
 
@@ -225,11 +214,12 @@ def dbscan_cluster_lines(lines, indices=False, eps=0.02):
         :param lines: unpacked 2D array of rho,theta values
         :param indices: Return indices of lines that belongs to cluster
         :param eps: The radian epsilon to cluster lines within
+        :param strictness: How steep the difference in scaling theta to be clustered by DBSCAN
     """
     if len(lines) == 0:
         return {}
     line_array = np.array([
-        [normalize_theta(theta)]
+        [sin(2*theta), cos(2*theta)]
         for _, theta in lines  # Use lines directly
     ])
     """
@@ -256,6 +246,19 @@ def kmeans_cluster_lines(lines):
     return label_to_cluster(lines, labels)
 
 
+def is_similar_lines(line1, line2, rho_eps, theta_eps):
+    rho_1, theta_1 = abs(line1[0]), line1[1]
+    rho_2, theta_2 = abs(line2[0]), line2[1]
+
+    rho_close = abs(rho_1 - rho_2) < rho_eps
+    theta_close = abs(theta_1 - theta_2) < theta_eps
+
+    if rho_close and theta_close:
+        return True
+
+    return False
+
+
 def filter_similar_lines(lines, image_shape):
     """
     Filters similar lines by checking if rho and theta differences are below thresholds
@@ -278,22 +281,14 @@ def filter_similar_lines(lines, image_shape):
     rho_eps = 0.01 * h
     theta_eps = 0.03
 
-    for rho, theta in lines:
-        temp_rho = abs(rho)
+    for l1 in lines:
         too_close = False
-
-        for filtered_rho, filtered_theta in filtered:
-            temp_f_rho = abs(filtered_rho)
-            # Check if both rho and theta values are close
-            rho_close = abs(temp_rho - temp_f_rho) < rho_eps
-            theta_close = abs(theta - filtered_theta) < theta_eps
-
-            if rho_close and theta_close:
-                too_close = True
+        for filtered_l in filtered:
+            too_close = is_similar_lines(l1, filtered_l, rho_eps, theta_eps)
+            if too_close:
                 break
-
         if not too_close:
-            filtered.append((rho, theta))
+            filtered.append(l1)
 
     return [[rho, theta] for rho, theta in filtered]
 
@@ -365,11 +360,11 @@ def check_grid_like(group1, group2, image_shape=None, corners=[]):
                 if len(indices) > 0:
                     corner_intersect += 1
             total_intersect += 1
-            row.append(intersect_point)
+            row.append(((i, j), intersect_point))
             # Find distance between each line intersection
             if i > 0 and len(intersection_list[i - 1]) > j:
-                above_point = intersection_list[i - 1][j]
-                if above_point is not None:
+                if intersection_list[i - 1][j] is not None:
+                    above_point = intersection_list[i - 1][j][1]
                     dist_diff_up = np.linalg.norm(
                         np.array(above_point) - np.array(intersect_point)
                     )
@@ -388,10 +383,10 @@ def check_grid_like(group1, group2, image_shape=None, corners=[]):
 
     # Section to find variance between line rhos
     for i, line1 in enumerate(group1[1:], start=1):
-        dist = abs(group1[i - 1][0] - line1[0])
+        dist = abs(abs(group1[i - 1][0]) - abs(line1[0]))
         rho_dist_list1.append(dist)
     for i, line2 in enumerate(group2[1:], start=1):
-        dist = abs(group2[i - 1][0] - line2[0])
+        dist = abs(abs(group2[i - 1][0]) - abs(line2[0]))
         rho_dist_list2.append(dist)
 
     # Final confidencce score to classify grid by lines

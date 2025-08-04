@@ -167,54 +167,6 @@ def remove_outlier_away(interval, lines, threshold=0.05, mad_thres=2.5):
     return finalize
 
 
-def remove_outlier_parallel(interval, lines, threshold=0.02):
-    """
-    Theta should remain relatively the same, so rho is considered more
-    Gap should increase since its going towards the camera
-    :param interval:
-    :param lines:
-    :param threshold: Maximum allowed deviation from expected trend
-    :return:
-    """
-    i = 0
-    prev_change = -sys.maxsize
-    final_indices = []
-    while i < len(interval) - 1:
-        if len(final_indices) == 0:
-            lines1 = [lines[index] for index in interval[i]]
-        else:
-            lines1 = [lines[final_indices[-1][1]]]
-        lines2 = [lines[index] for index in interval[i + 1]]
-        rho_diffs = []
-        indices = []
-        for j, l1 in enumerate(lines1):
-            for k, l2 in enumerate(lines2):
-                # Check theta difference first, must be consistent
-                t_diff = abs(l1[1] - l2[1])
-                if t_diff > threshold:
-                    continue
-                rho_diffs.append(abs(l1[0] - l2[0]))
-                indices.append((interval[i][j], interval[i + 1][k]))
-        if len(rho_diffs) == 0:
-            i += 1
-            continue
-        med = np.median(np.percentile(rho_diffs, [65]))
-        """
-        Needs further on why prev_change is used here (no trends)
-        """
-        if med >= prev_change:
-            closest_index = min(range(len(rho_diffs)), key=lambda i: abs(rho_diffs[i] - med))
-            final_indices.append(indices[closest_index])
-            prev_change = med * (1 - threshold)
-        else:
-            # Fail safe
-            final_indices.append(indices[0])
-        i += 1
-
-    # Finalize lines, we got best fit for each step, combine to one line
-    return finalize_lines(final_indices, lines)
-
-
 def remove_outlier_norm(interval, lines, direction, threshold=0.05, deviation=3):
     """
     Using the direction of the group of lines' VP, we should expect some behaviors.
