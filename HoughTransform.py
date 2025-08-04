@@ -190,3 +190,22 @@ def points_between_lines(points, line1, line2):
     mask = (d1 * d2 < 0)
 
     return pts[mask]
+
+
+def line_to_rho_theta(m, b):
+    """
+    GPT helper function to convert to houghline format
+    :param m:
+    :param b:
+    :return:
+    """
+    # Convert slope-intercept to normal form (rho, theta)
+    # Line: y = m * x + b  → Ax + By + C = 0, where A = -m, B = 1, C = -b
+    A = -m
+    B = 1
+    C = -b
+
+    theta = np.arctan2(B, A)         # angle of the normal vector
+    rho = -C / np.sqrt(A**2 + B**2)  # distance to origin
+
+    return rho, theta

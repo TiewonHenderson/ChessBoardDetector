@@ -1,8 +1,8 @@
 import sys
 import numpy as np
 import cv2
-from scipy.spatial.distance import cdist
 from math import sin,cos
+from sklearn.linear_model import RANSACRegressor
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import Chessboard_detection as cd
 from ChessBoardDetector import HoughTransform as ht
@@ -152,9 +152,9 @@ def line_interpolate(group1, group2, sect_list, corners, threshold=10, image=Non
     best_gap_g2 = get_most_common_dist([(abs(rho), theta) for rho, theta in g2])
     # First round, find all in between lines
     if len(relative_g1) < 9:
-        for i in range(len(g1) - 1):
-            line1 = g1[i]
-            line2 = g1[i + 1]
+        for i in range(1, len(g1)):
+            line1 = g1[i - 1]
+            line2 = g1[i]
             between_pts = ht.points_between_lines(corners, line1, line2)
             if len(between_pts) >= 4:
                 """
@@ -168,6 +168,16 @@ def line_interpolate(group1, group2, sect_list, corners, threshold=10, image=Non
                 round_error = abs(round(scale) - scale)
                 # Temp 0.15 acceptable rounding error range, at most interpolate 2 lines
                 if round_error < 0.15 and multi_scale <= 2:
+                    # GPT generated RANSAC to generate lines
+                    X = between_pts[:, 0].reshape(-1, 1)  # x values
+                    y = between_pts[:, 1]  # y values
+                    ransac = RANSACRegressor(residual_threshold=5.0)  # max y-error allowed
+                    ransac.fit(X, y)
+                    # Get line: y = m * x + b
+                    m = ransac.estimator_.coef_[0]
+                    b = ransac.estimator_.intercept_
+                    # Get inliers
+                    inlier_mask = ransac.inlier_mask_
 
 
 
