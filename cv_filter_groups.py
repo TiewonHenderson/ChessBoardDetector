@@ -185,7 +185,7 @@ def cv_clean_lines(lines, corners, direction, image_shape, image=None):
         return None, None
     h, w = image_shape
     min_gap = 0.0264 * h
-    max_gap = 0.15 * h
+    max_gap = 0.2 * h
     center_p = w / 2
     perd_theta = (np.deg2rad(direction) + np.pi / 2) % np.pi
     # Formula given by GPT to get perpendicular line at center of image
@@ -227,15 +227,17 @@ def cv_clean_lines(lines, corners, direction, image_shape, image=None):
     # cd.find_exact_line(image, copy_line, index=-1, green=True)
 
     # Only checks biggest interval
-    intervals = group_overlap(lines, corners, image_shape)
-    # intervals = max(get_intervals(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
+    intervals = max(get_intervals(gap_list, gap_stats, max_gap, min_gap), key=len, default=[])
+    sub_lines = [lines[i] for grouped_i in intervals for i in grouped_i]
+    intervals = group_overlap(sub_lines, corners, image_shape)
     if len(intervals) >= 2:
         if is_parallel:
-            got_lines = ro.remove_outlier_parallel(intervals, lines)
+            got_lines = ro.remove_outlier_parallel(intervals, sub_lines)
         else:
-            got_lines = ro.brute_force_find(intervals, lines, direction)
+            got_lines = ro.brute_force_find(intervals, sub_lines, direction)
 
         if got_lines is None or len(got_lines) <= 2:
+            print("Remove outlier removed too many lines, NO group found")
             return None, None
         # With removed lines, we get the new average direction by new thetas
 

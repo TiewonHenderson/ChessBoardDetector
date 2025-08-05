@@ -108,8 +108,9 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=4):
     lines = ht.unpack_hough(cv2.HoughLines(e, 1, 0.0175, threshold=threshold))
     lines = fg.filter_similar_lines(lines, image_shape)
     if corners is not None:
-        lines = hcd.filter_hough_lines_by_corners(lines, corners, min_gap)
-    return lines
+        lines, pt_by_line = hcd.filter_hough_lines_by_corners(lines, corners, min_gap)
+        return lines, pt_by_line
+    return lines, None
 
 
 def cluster_lines(image, lines, corners, gap_eps, corner=[]):
@@ -142,25 +143,6 @@ def cluster_lines(image, lines, corners, gap_eps, corner=[]):
         # print("before")
         # find_exact_line(image, got_lines, 0, green=False)
 
-        # if dir == 0 or dir == 180:
-        #     """
-        #     Circular clustering is treated differently
-        #     BUT since we know all the lines share the vp on top / bottom
-        #     (Bottom doesn't really make sense camera wised, we'll focus)
-        #     We really only care about theta around [0, pi/4] and [3pi/4, pi]
-        #     """
-        #     copied_lines = [[rho, theta + np.pi / 2] for rho, theta in got_lines]
-        #     clusters = fg.dbscan_cluster_lines(copied_lines, indices=True, eps=dir_eps[dir]).values()
-        #     if len(clusters) == 0:
-        #         continue
-        #     copied_lines = max(clusters, key=len)
-        #     got_lines = [got_lines[i] for i in copied_lines]
-        # else:
-        #     clusters = fg.dbscan_cluster_lines(got_lines).values()
-        #     if len(clusters) == 0:
-        #         continue
-        #     got_lines = max(fg.dbscan_cluster_lines(got_lines, eps=dir_eps[dir]).values(), key=len)
-
         clean_lines, new_dir = cvfg.cv_clean_lines(got_lines, corners, dir, image.shape[:2], image)
 
         if clean_lines is None or len(clean_lines) == 0:
@@ -170,7 +152,6 @@ def cluster_lines(image, lines, corners, gap_eps, corner=[]):
         # find_exact_line(image, clean_lines, -1, green=True)
 
         final_clusters.append((clean_lines, new_dir))
-
     return final_clusters
 
 
@@ -266,22 +247,6 @@ def find_exact_line(image, lines, index, corners=[], green=True):
     ht.show_images(img)
 
 
-def show_points(points, height=1000, width=1000, image=None):
-    # Create a blank grayscale image if none is provided
-    if image is None:
-        use_image = np.zeros((height, width), dtype=np.uint8)
-    else:
-        use_image = image.copy()
-
-    # Draw each point as a small white circle
-    for x, y in points:
-        cv2.circle(use_image, (int(x), int(y)), radius=3, color=255, thickness=-1)
-
-    # Show the image
-    cv2.imshow("Verified Points", use_image)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-
 
 def detect_chessboard(image_name, thres_config):
     """
@@ -326,11 +291,11 @@ def detect_chessboard(image_name, thres_config):
         y = int(y)
         binary_map[y, x] = 255
 
-    lines = houghLine_detect([height, width],
-                             binary_map,
-                             corners,
-                             mask,
-                             3)
+    lines, line_by_pts = houghLine_detect([height, width],
+                                                    binary_map,
+                                                    corners,
+                                                    mask,
+                                                    3)
     find_exact_line(image, lines, 0, corners=corners, green=False)
     # lines = sorted(lines, key=lambda x: x[1])
     # for i in range(len(lines)):
@@ -347,12 +312,19 @@ def detect_chessboard(image_name, thres_config):
         print("best grid found")
         max_index = scores.index(max(scores))
         # Structured as g = (lines, params for curve fit, direction overall)
-        g1, g2 = final_lines[max_index]
+        g1_data, g2_data = final_lines[max_index]
+        g1_lines, g1_dir = g1_data
+        g2_lines, g2_dir = g2_data
 
         # print("score", scores[max_index])
         # find_exact_line(image, g1[0] + g2[0], 0, corners=corners, green=False)
 
-        gc.line_interpolate(g1, g2, sect_list[max_index], corners, image=image)
+        """
+        sect_list = the intersection between the two groups represented as points
+        line_pts = the intersection between lines and corner points
+        corners = all corner points found by a corner detection function
+        """
+        gc.line_interpolate(g1_lines, g2_lines, sect_list[max_index], line_by_pts, corners, image=image)
     else:
         print("No found grid")
 

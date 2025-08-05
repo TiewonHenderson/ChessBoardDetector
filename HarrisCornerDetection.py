@@ -169,6 +169,7 @@ def filter_hough_lines_by_corners(lines, corners, min_gap, tolerance=5, min_hits
     :return:
     """
     filtered_lines = []
+    pt_by_line = {}
     for l in lines:
         hits = set()
         for point in corners:
@@ -178,7 +179,8 @@ def filter_hough_lines_by_corners(lines, corners, min_gap, tolerance=5, min_hits
         if len(hits) >= min_hits:
             if point_masking(hits, min_gap) is not None:
                 filtered_lines.append(l)
-    return filtered_lines
+                pt_by_line[tuple(l)] = hits
+    return filtered_lines, pt_by_line
 
 
 def main():

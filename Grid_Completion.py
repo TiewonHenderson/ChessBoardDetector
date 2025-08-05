@@ -91,7 +91,7 @@ def hough_line_intersect(line, point):
 
 def get_most_common_dist(lines, min_count_threshold=1):
     """
-
+    Get most common distance between lines to be used as reference of how big the grid square is
     :param lines:
     :return:
     """
@@ -100,7 +100,7 @@ def get_most_common_dist(lines, min_count_threshold=1):
 
     lines_c = np.array([rho for rho, _ in lines])
 
-    # Compute all pairwise gaps between consecutive lines
+    # GPT suggestion to use histogram
     gaps = np.diff(np.sort(lines_c))
 
     hist, bin_edges = np.histogram(gaps, bins='auto')
@@ -116,7 +116,7 @@ def get_most_common_dist(lines, min_count_threshold=1):
         return most_common
 
 
-def line_interpolate(group1, group2, sect_list, corners, threshold=10, image=None):
+def line_interpolate(group1, group2, sect_list, line_pts, corners, threshold=10, image=None):
     """
     Interpolate lines by:
     1) Verifying lines with valid intersection by corners
@@ -124,62 +124,82 @@ def line_interpolate(group1, group2, sect_list, corners, threshold=10, image=Non
     3) Extend out until number of lines for both group reaches 9
     :param group1:
     :param group2:
-    :param sect_list:
-    :param corners:
+    :param sect_list: the intersection between the two groups represented as points
+    :param line_pts: the intersection between lines and corner points
+    :param corners: all corner points found by a corner detection function
     :param threshold:
     :return:
     """
-    if len(group1) < 2 or len(group2) < 2:
+    if group1 is None or group2 is None or len(group1[0]) < 2 or len(group2[0]) < 2:
         return None, None
 
+
+    all_sects = []
+    for row in sect_list:
+        for line_tuple in row:
+            if line_tuple is None:
+                continue
+            line_indices, sect = line_tuple
+            all_sects.append(sect)
     verified, lines_by_i = intersect_verification(sect_list, corners)
     g1 = []
     g2 = []
     for i, line_index in lines_by_i:
         if i == 0:
-            g1.append(group1[0][line_index])
+            g1.append(group1[line_index])
         else:
-            g2.append(group2[0][line_index])
+            g2.append(group2[line_index])
 
     if image is not None:
         g1_copy = g1.copy()
         g1_copy.extend(g2)
-        cd.find_exact_line(image, g1_copy, -1)
+        cd.find_exact_line(image, g1_copy, -1, green=False)
+
+    line_sects = []
+    show_sects = []
+    for g1_line in g1:
+        key = tuple(g1_line)
+        if key in line_pts:
+            line_sects.append(list(line_pts[key]))
+            show_sects.extend(line_pts[key])
+    for g2_line in g2:
+        key = tuple(g2_line)
+        if key in line_pts:
+            line_sects.append(list(line_pts[key]))
+            show_sects.extend(line_pts[key])
+
+    # show_points(verified)
+    # show_points([], all_sects)
+    # show_points([], [], show_sects)
+    # show_points([], [], [], corners)
 
     # Absolute values groups of lines for relatives location of lines
-
     best_gap_g1 = get_most_common_dist([(abs(rho), theta) for rho, theta in g1])
     best_gap_g2 = get_most_common_dist([(abs(rho), theta) for rho, theta in g2])
-    # First round, find all in between lines
-    if len(relative_g1) < 9:
-        for i in range(1, len(g1)):
-            line1 = g1[i - 1]
-            line2 = g1[i]
-            between_pts = ht.points_between_lines(corners, line1, line2)
-            if len(between_pts) >= 4:
-                """
-                TO-DO, make use of a accurate most common gap function to check
-                How many lines can be interpolated between
-                """
-                rho1, rho2 = abs(line1[0]), abs(line2[0])
-                rho_diff = abs(rho1 - rho2)
-                scale = rho_diff / best_gap_g1
-                multi_scale = round(scale)
-                round_error = abs(round(scale) - scale)
-                # Temp 0.15 acceptable rounding error range, at most interpolate 2 lines
-                if round_error < 0.15 and multi_scale <= 2:
-                    # GPT generated RANSAC to generate lines
-                    X = between_pts[:, 0].reshape(-1, 1)  # x values
-                    y = between_pts[:, 1]  # y values
-                    ransac = RANSACRegressor(residual_threshold=5.0)  # max y-error allowed
-                    ransac.fit(X, y)
-                    # Get line: y = m * x + b
-                    m = ransac.estimator_.coef_[0]
-                    b = ransac.estimator_.intercept_
-                    # Get inliers
-                    inlier_mask = ransac.inlier_mask_
-
-
-
 
     # Second round, find expansion lines outwards if not enough corners inbetween
+
+
+def show_points(points, points_2=[], points_3=[], points_4=[], height=1000, width=1000, image=None):
+    # Create a blank grayscale image if none is provided
+    if image is None:
+        use_image = np.zeros((height, width, 3), dtype=np.uint8)  # 3 channels for color
+    else:
+        use_image = image.copy()
+
+    # Draw each point as a small white circle (colors from GPT)
+    for x, y in points:
+        cv2.circle(use_image, (int(x), int(y)), radius=2, color=(255, 255, 255), thickness=-1)
+    # Green for first `points_2`
+    for x, y in points_2:
+        cv2.circle(use_image, (int(x), int(y)), radius=5, color=(0, 255, 0), thickness=1)
+    # Yellow for second `points_2`
+    for x, y in points_3:
+        cv2.circle(use_image, (int(x), int(y)), radius=8, color=(0, 255, 255), thickness=1)
+    for x, y in points_4:
+        cv2.circle(use_image, (int(x), int(y)), radius=12, color=(100, 100, 100), thickness=1)
+
+    # Show the image
+    cv2.imshow("Verified Points", use_image)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
