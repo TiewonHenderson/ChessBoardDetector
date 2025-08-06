@@ -55,10 +55,11 @@ def intersect_verification(sect_list, corner, threshold=7):
     verified stores all intersections between lines verified by corner points
     verified_lines stores lines by their verified points
     """
-    verified = set()
+    verified = []
     verified_lines = {}
     max_dist = threshold ** 2
     for row in sect_list:
+        verified.append([])
         for element in row:
             if element is None:
                 continue
@@ -78,7 +79,7 @@ def intersect_verification(sect_list, corner, threshold=7):
                 found_corner = tuple(min_dist_pt[1])
                 for i, x in enumerate(indices):
                     verified_lines.setdefault((i, x), []).append(found_corner)
-                verified.add(found_corner)
+                verified[-1].append(found_corner)
     return verified, verified_lines
 
 
@@ -201,14 +202,20 @@ def score_points(verified, all_sects, line_corners, corners):
     return point_system
 
 
-def mask_9x9(verified, g1_steps, g2_steps):
+def mask_9x9(verified, steps):
     """
     Insert artifical points into a copy of verified to get a full 9x9 to find the nearest neighbor of corners
-    :param verified:
-    :param g1_steps:
-    :param g2_steps:
+    :param verified: a matrix version of corner points, where points are in row
+    :param steps:
     :return:
     """
+    mask = verified.copy()
+    for row in mask:
+        if len(row) == 9:
+            continue
+        elif len(row) > 9:
+
+        else:
 
 
 def point_interpolate(group1, group2, sect_list, line_pts, corners, lines, threshold=10, image=None):
@@ -228,11 +235,13 @@ def point_interpolate(group1, group2, sect_list, line_pts, corners, lines, thres
         return None, None
 
     verified, verified_lines = intersect_verification(sect_list, corners)
-    verified_list = list(verified)
+    flat_verified = [pt for row in verified for pt in row]
     g1 = []
     g2 = []
-    max_g1 = []
-    max_g2 = []
+    med_steps = []
+    """
+    sect_list is stored by row/col, 
+    """
     for key in verified_lines:
         i, line_index = key
         if i == 0:
@@ -244,13 +253,14 @@ def point_interpolate(group1, group2, sect_list, line_pts, corners, lines, thres
                 max_g2 = verified_lines[key]
             g2.append((line_index, group2[line_index]))
 
-    g1_steps = get_best_dist_rep(max_g1)
-    g2_steps = get_best_dist_rep(max_g2)
+    steps = get_best_dist_rep(max_g1)
 
+    for x in verified:
+        print(x)
     # Expand bounding box until a 9x9 grid is found
-    box = get_bounding_square(verified_list)
-    dimension = ceil(sqrt(len(verified_list)))
-    missing_amt = abs(len(verified_list) - dimension**2)
+    box = get_bounding_square(flat_verified)
+    dimension = ceil(sqrt(len(flat_verified)))
+    missing_amt = abs(len(flat_verified) - dimension**2)
 
     # Find high scoring points within the box first
     # while missing_amt > 0:
@@ -261,12 +271,12 @@ def point_interpolate(group1, group2, sect_list, line_pts, corners, lines, thres
     #     cd.find_exact_line(image, g1_copy, -1, green=False)
 
     all_sects, line_corners = get_points(sect_list, line_pts, True)
-    show_points(verified, box=box)
+    show_points(flat_verified, box=box)
     # show_points([], all_sects)
     # show_points([], [], line_corners)
     # show_points([], [], [], corners)
-    print(len(verified))
-    show_points(verified, all_sects, line_corners, corners, lines=lines, box=box)
+    print(len(flat_verified))
+    show_points(flat_verified, all_sects, line_corners, corners, lines=lines, box=box)
 
 
 def show_points(points, points_2=[], points_3=[], points_4=[],
