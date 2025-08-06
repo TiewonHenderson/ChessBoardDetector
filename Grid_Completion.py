@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 import cv2
-from math import sin,cos
+from math import sin,cos,ceil,sqrt
 from scipy.optimize import curve_fit
 from sklearn.linear_model import RANSACRegressor
 from ChessBoardDetector import HarrisCornerDetection as hcd
@@ -82,6 +82,21 @@ def intersect_verification(sect_list, corner, threshold=7):
     return verified, verified_lines
 
 
+def get_bounding_square(points):
+    """
+    gpt generated
+    :param points:
+    :return:
+    """
+    # Convert to required format (e.g., float32 for OpenCV)
+    points = np.array(points, dtype=np.float32)
+
+    rect = cv2.minAreaRect(points)  # returns ((center_x, center_y), (width, height), angle)
+    box = cv2.boxPoints(rect)  # gets 4 corner points of the rotated rect
+    box = np.int0(box)  # convert to int if needed
+    return box
+
+
 def sort_points_by_range(points):
     """
         Claude generated to quickly sort by x/y first by bigger range
@@ -102,67 +117,6 @@ def sort_points_by_range(points):
     return sorted_points
 
 
-def outlier_by_diff(points):
-    """
-    Claude generated to use second order difference between points
-    :param points:
-    :return:
-    """
-    points = sort_points_by_range(points)
-    if len(points) < 4:  # Need at least 4 points for meaningful second diff
-        return points
-    distances = np.linalg.norm(np.diff(points, axis=0), axis=1)
-    second_diff = np.diff(distances)
-    # Find the biggest absolute change in second difference
-    max_change_idx = np.argmax(np.abs(second_diff))
-    point_to_remove_idx = max_change_idx + 1
-    # Ensure we don't remove the last point or go out of bounds
-    if point_to_remove_idx >= len(points) - 1:
-        # Find alternative - look for second largest change that's not at the end
-        second_diff_abs = np.abs(second_diff)
-        second_diff_abs[max_change_idx] = -1  # Mask the largest
-        # Find valid alternatives (not pointing to last point)
-        valid_indices = []
-        for i in range(len(second_diff_abs)):
-            if second_diff_abs[i] > 0 and (i + 1) < len(points) - 1:
-                valid_indices.append(i)
-        if valid_indices:
-            # Choose the one with highest remaining change
-            best_alt_idx = max(valid_indices, key=lambda x: second_diff_abs[x])
-            point_to_remove_idx = best_alt_idx + 1
-        else:
-            # No suitable point to remove
-            return points
-    # Actually remove the point
-    updated_points = np.delete(points, point_to_remove_idx, axis=0)
-    updated_distances = np.linalg.norm(np.diff(updated_points, axis=0), axis=1)
-    return updated_points
-
-
-def find_closest_set(ref_points, candidates):
-    """
-    GPT generated to see which points are closest to the reference points overall
-    :param ref_points:
-    :param candidates:
-    :return:
-    """
-    ref_points = np.array(ref_points)  # shape: (9, 2)
-    candidates = np.array(candidates)  # shape: (n, 9, 2)
-
-    # Compute Euclidean distance between corresponding points
-    diffs = candidates - ref_points[np.newaxis, :, :]  # shape: (n, 9, 2)
-    dists = np.sum(diffs**2, axis=1)
-
-    # Sum distances for each candidate set
-    total_dists = np.sum(dists, axis=1)  # shape: (n,)
-
-    # Find index of minimum total distance
-    best_index = np.argmin(total_dists)
-    best_set = candidates[best_index]
-
-    return best_index, best_set
-
-
 def hough_line_intersect(line, point):
     """
     :param line: [rho, theta]
@@ -178,19 +132,86 @@ def hough_line_intersect(line, point):
     return distance
 
 
-def get_points(sect_list, line_pts):
+def get_points(sect_list, line_pts, get_set=False):
+    """
+    Help get the points from both list
+    :param sect_list:
+    :param line_pts:
+    :return:
+    """
     all_sects = []
     all_line_pts = []
+    if get_set:
+        all_sects = set()
+        all_line_pts = set()
     for row in sect_list:
         for pt_info in row:
             if pt_info is not None:
-                all_sects.append(pt_info[1])
+                if get_set:
+                    all_sects.add(tuple(pt_info[1]))
+                else:
+                    all_sects.append(pt_info[1])
     for key in line_pts:
-        all_line_pts.extend(line_pts[key])
+        if get_set:
+            for line in line_pts[key]:
+                all_line_pts.add(tuple(line))
+        else:
+            all_line_pts.extend(line_pts[key])
     return all_sects, all_line_pts
 
 
-def line_interpolate(group1, group2, sect_list, line_pts, corners, lines, threshold=10, image=None):
+def get_best_dist_rep(points):
+    """
+    Gets a median of steps between x and y to be used for point interpolation
+    :param points:
+    :return:
+    """
+    points = np.array(points)
+    if len(points) < 2:
+        return None
+    diffs = np.diff(points, axis=0)
+    step_x = np.median(diffs[:, 0])
+    step_y = np.median(diffs[:, 1])
+
+    return np.array([step_x, step_y])
+
+
+def score_points(verified, all_sects, line_corners, corners):
+    """
+    Scores points base on how many lists they are in
+    verified overrules all as being the highest scoring points, so they aren't considered
+    scoring:
+    corner      line_corner     line_sect
+    2           +4              *4
+    :param verified:
+    :param all_sects:
+    :param line_corners:
+    :param corners:
+    :return:
+    """
+    point_system = {}
+    for c in corners:
+        c_pt = tuple(c)
+        score = 2
+        if c_pt in line_corners:
+            score += 4
+        if c_pt in all_sects:
+            score *= 4
+        point_system[c_pt] = score
+    return point_system
+
+
+def mask_9x9(verified, g1_steps, g2_steps):
+    """
+    Insert artifical points into a copy of verified to get a full 9x9 to find the nearest neighbor of corners
+    :param verified:
+    :param g1_steps:
+    :param g2_steps:
+    :return:
+    """
+
+
+def point_interpolate(group1, group2, sect_list, line_pts, corners, lines, threshold=10, image=None):
     """
     Interpolate lines by:
     :param group1:
@@ -207,58 +228,49 @@ def line_interpolate(group1, group2, sect_list, line_pts, corners, lines, thresh
         return None, None
 
     verified, verified_lines = intersect_verification(sect_list, corners)
+    verified_list = list(verified)
     g1 = []
     g2 = []
+    max_g1 = []
+    max_g2 = []
     for key in verified_lines:
         i, line_index = key
         if i == 0:
+            if len(verified_lines[key]) > len(max_g1):
+                max_g1 = verified_lines[key]
             g1.append((line_index, group1[line_index]))
         else:
+            if len(verified_lines[key]) > len(max_g2):
+                max_g2 = verified_lines[key]
             g2.append((line_index, group2[line_index]))
 
-    # Loop through the larger group to finish
-    selected_group = g1
-    group_num = 0
-    if len(g1) < len(g2):
-        group_num = 1
-        selected_group = g2
+    g1_steps = get_best_dist_rep(max_g1)
+    g2_steps = get_best_dist_rep(max_g2)
 
-    for index, _ in selected_group:
-        verified_corners = np.array(verified_lines[(group_num, index)])
-        reference_pts = None
-        if len(verified_corners) > 9:
-            # If too many points, remove by outlier diff with second order difference of distance
-            while len(verified_corners) != 9:
-                verified_corners = outlier_by_diff(verified_corners)
-        elif len(verified_corners) < 9:
-            # If too little points
-            # Expand out with hcd masking and see which mask is best
-            points_copy = np.array(verified_corners)
-            step_diffs = np.diff(points_copy, axis=0)  # N-1
-            for i, diff in enumerate(step_diffs):
-                # Stage to get the interpolated points
-                x_d, y_d = diff
-                masking_pts = hcd.create_point_mask(points_copy[i], points_copy[i+1], x_d, y_d)
-                for i in range(len(masking_pts)):
+    # Expand bounding box until a 9x9 grid is found
+    box = get_bounding_square(verified_list)
+    dimension = ceil(sqrt(len(verified_list)))
+    missing_amt = abs(len(verified_list) - dimension**2)
 
-            if reference_pts is None:
-
+    # Find high scoring points within the box first
+    # while missing_amt > 0:
 
     # if image is not None:
     #     g1_copy = g1.copy()
     #     g1_copy.extend(g2)
     #     cd.find_exact_line(image, g1_copy, -1, green=False)
 
-    all_sects, line_corners = get_points(sect_list, line_pts)
-    show_points(verified)
+    all_sects, line_corners = get_points(sect_list, line_pts, True)
+    show_points(verified, box=box)
     # show_points([], all_sects)
     # show_points([], [], line_corners)
     # show_points([], [], [], corners)
     print(len(verified))
-    show_points(verified, all_sects, line_corners, corners, lines=lines)
+    show_points(verified, all_sects, line_corners, corners, lines=lines, box=box)
 
 
-def show_points(points, points_2=[], points_3=[], points_4=[], height=1000, width=1000, image=None, lines=None):
+def show_points(points, points_2=[], points_3=[], points_4=[],
+                height=1000, width=1000, image=None, lines=None, box=None):
     """
     for displaying, not useful for true corners
     :param points:
@@ -276,6 +288,12 @@ def show_points(points, points_2=[], points_3=[], points_4=[], height=1000, widt
     else:
         use_image = image.copy()
 
+    # Draw lines between each corner
+    if box is not None:
+        for i in range(4):
+            pt1 = tuple(box[i])
+            pt2 = tuple(box[(i + 1) % 4])
+            cv2.line(use_image, pt1, pt2, (0, 255, 0), 2)
     if lines is not None:
         ht.put_lines(lines, use_image, (0, 0, 255), 1)
 
@@ -290,6 +308,7 @@ def show_points(points, points_2=[], points_3=[], points_4=[], height=1000, widt
         cv2.circle(use_image, (int(x), int(y)), radius=8, color=(0, 255, 255), thickness=1)
     for x, y in points_4:
         cv2.circle(use_image, (int(x), int(y)), radius=12, color=(100, 100, 100), thickness=1)
+
 
     # Show the image
     cv2.imshow("Verified Points", use_image)

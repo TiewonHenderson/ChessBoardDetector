@@ -327,7 +327,7 @@ def detect_chessboard(image_name, thres_config):
         line_pts = the intersection between lines and corner points
         corners = all corner points found by a corner detection function
         """
-        gc.line_interpolate(g1_lines,
+        gc.point_interpolate(g1_lines,
                              g2_lines,
                              sect_list[max_index],
                              line_by_pts,
