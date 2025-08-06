@@ -293,7 +293,7 @@ def filter_similar_lines(lines, image_shape):
     return [[rho, theta] for rho, theta in filtered]
 
 
-def check_grid_like(group1, group2, image_shape=None, corners=[]):
+def check_grid_like(g1, g2, image_shape=None, corners=[]):
     """
     OLD FUNCTION OF SCORING GRID LIKE:
     works best with top down view, and strict corner view
@@ -305,12 +305,14 @@ def check_grid_like(group1, group2, image_shape=None, corners=[]):
     Amount of lines = 20/100
 
 
-    :param group1: Cluster of lines represented as an unpacked 2D list
-    :param group2: Cluster of lines represented as an unpacked 2D list
+    :param g1: Cluster of lines represented as an unpacked 2D list
+    :param g2: Cluster of lines represented as an unpacked 2D list
     :return: A score on how grid like the clu
     """
-    if len(group1) == 0 or len(group2) == 0:
+    if len(g1) == 0 or len(g2) == 0:
         return
+    group1 = g1.copy()
+    group2 = g2.copy()
     group1.sort(key=lambda x: x[0])
     group2.sort(key=lambda x: x[0])
 

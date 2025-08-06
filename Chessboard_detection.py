@@ -303,7 +303,9 @@ def detect_chessboard(image_name, thres_config):
     #     find_exact_line(image, lines, i, corners=corners, green=True)
 
     if len(lines) <= 4:
-        return False
+        print("Not enough lines for a grid")
+        print("Failed houghline!!!")
+        return None
     clusters = cluster_lines(image, lines, corners, gap_eps, corners)
 
     final_lines, scores, sect_list = check_all_grids(image, clusters, corners)
@@ -312,6 +314,7 @@ def detect_chessboard(image_name, thres_config):
         print("best grid found")
         max_index = scores.index(max(scores))
         # Structured as g = (lines, params for curve fit, direction overall)
+        # Should still be ordered by intersections
         g1_data, g2_data = final_lines[max_index]
         g1_lines, g1_dir = g1_data
         g2_lines, g2_dir = g2_data
@@ -324,9 +327,16 @@ def detect_chessboard(image_name, thres_config):
         line_pts = the intersection between lines and corner points
         corners = all corner points found by a corner detection function
         """
-        gc.line_interpolate(g1_lines, g2_lines, sect_list[max_index], line_by_pts, corners, image=image)
+        gc.line_interpolate(g1_lines,
+                             g2_lines,
+                             sect_list[max_index],
+                             line_by_pts,
+                             corners,
+                             lines=lines,
+                             image=image)
     else:
-        print("No found grid")
+        print("No valid grid found")
+        print("Failed check_all_grids")
 
 
 def main():

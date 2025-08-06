@@ -56,6 +56,7 @@ def group_overlap(lines, corners, image_shape, threshold=2):
     :return:
     """
     dim, _ = image_shape
+    sect_bounds = 0.2
     rho_eps = 0.01 * dim
     theta_eps = 0.0175 * threshold
     used = set()
@@ -74,13 +75,21 @@ def group_overlap(lines, corners, image_shape, threshold=2):
             if j in used:
                 continue
             count_same = 0
+            # If intersection is in middle of image: overlap them
+            sect = fg.intersection_polar_lines(lines[i], lines[j])
+            if sect is not None:
+                x, y = sect
+                if (1 - sect_bounds) * dim > x > sect_bounds * dim and\
+                    (1 - sect_bounds) * dim > y > sect_bounds * dim:
+                    intervals[-1].append(j)
+                    used.add(j)
+                    continue
             for pt in points:
                 if hcd.hough_line_intersect(lines[j], pt):
                     count_same += 1
             # Good enough conditions to consider as overlapping
             # Very hard to get different lines with 4 different points that weren't clustered together
-            if count_same >= 4 or count_same/len(points) or \
-               count_same >= 2 and fg.is_similar_lines(lines[i], lines[j], rho_eps, theta_eps):
+            if count_same >= 1:
                 intervals[-1].append(j)
                 used.add(j)
     return intervals

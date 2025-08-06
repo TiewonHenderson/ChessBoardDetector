@@ -117,6 +117,31 @@ def hough_line_intersect(line, point, tolerance=1):
     return False
 
 
+def create_point_mask(pt1, pt2, x_d, y_d):
+    """
+    Helper function to create inserted points with the same steps given
+    :param pt1:
+    :param pt2:
+    :param x_d:
+    :param y_d:
+    :return:
+    """
+    x0, y0 = pt1
+    x1, y1 = pt2
+    masking_pts = []
+    before_pts = []
+    # adds points in both directions
+    for j in range(1, 8):
+        pt_before = [x0 - (j * x_d), y0 - (j * y_d)]
+        pt_after = [x1 + (j * x_d), y1 + (j * y_d)]
+        before_pts.append(pt_before)
+        masking_pts.append(pt_after)
+    # Before points are backwards, reverse then extend with afters points
+    before_pts = before_pts[::-1]
+    before_pts.extend(masking_pts)
+    return before_pts
+
+
 def point_masking(points, min_gap, tolerance=5, needed_score=3):
     """
     Use each gap and create a 1x7 mask with distance
@@ -134,14 +159,7 @@ def point_masking(points, min_gap, tolerance=5, needed_score=3):
     for i, diff in enumerate(step_diffs):
         # Stage to get the interpolated points
         x_d, y_d = diff
-        x0, y0 = points_copy[i]
-        x1, y1 = points_copy[i + 1]
-        masking_pts = []
-        for j in range(1, 8):
-            pt_before = [x0 - (j * x_d), y0 - (j * y_d)]
-            pt_after = [x1 + (j * x_d), y1 + (j * y_d)]
-            masking_pts.append(pt_before)
-            masking_pts.append(pt_after)
+        masking_pts = create_point_mask(points_copy[i], points_copy[i + 1], x_d,  y_d)
 
         # Stage to see if any points
         passing_pts = [points_copy[i], points_copy[i + 1]]
