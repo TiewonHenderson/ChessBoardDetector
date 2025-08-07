@@ -293,7 +293,7 @@ def filter_similar_lines(lines, image_shape):
     return [[rho, theta] for rho, theta in filtered]
 
 
-def check_grid_like(g1, g2, image_shape=None, corners=[]):
+def check_grid_like(g1, g2, image_shape, corners=[]):
     """
     OLD FUNCTION OF SCORING GRID LIKE:
     works best with top down view, and strict corner view
@@ -317,10 +317,9 @@ def check_grid_like(g1, g2, image_shape=None, corners=[]):
     group2.sort(key=lambda x: x[0])
 
     c_tree = None
-    h = w = None
+    h, w = image_shape
     if len(corners) > 0 and image_shape is not None:
         c_tree = KDTree(corners)
-        h, w, _ = image_shape
 
     # The more closer the amount of lines is to 2 * ([8,10]), the better
     total_lines = len(group1) + len(group2)
@@ -338,16 +337,21 @@ def check_grid_like(g1, g2, image_shape=None, corners=[]):
     rho_dist_list2 = []
 
     # Section to find variance intersection between lines
-    for i, lines1 in enumerate(group1):
+    for i, lines1 in enumerate(g1):
         row = []
         prev_intersect_point = None
-        for j, lines2 in enumerate(group2):
+        for j, lines2 in enumerate(g2):
             intersect_point = intersection_polar_lines(lines1, lines2)
+            # Bounding box for x, y. If intersection is outside the image, don't accept
             if intersect_point is None:
                 # None is appended to keep grid align
                 row.append(None)
                 continue
-            if c_tree is not None and image_shape is not None:
+            x, y = intersect_point
+            if x < 0 or x > w or y < 0 or y > h:
+                row.append(None)
+                continue
+            if c_tree is not None:
                 eps = h / 100
                 """
                 KD-tree allows searching for same/similar points (intersections) without
@@ -382,6 +386,9 @@ def check_grid_like(g1, g2, image_shape=None, corners=[]):
                 all_intersects_mean[1] += 1
             prev_intersect_point = intersect_point
         intersection_list.append(row)
+
+    if total_intersect <= 9:
+        return 0, intersection_list
 
     # Section to find variance between line rhos
     for i, line1 in enumerate(group1[1:], start=1):

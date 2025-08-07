@@ -4,7 +4,6 @@ import cv2
 import numpy as np
 from collections import Counter
 from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import Grid_square_detection as gsd
 from ChessBoardDetector import cv_filter_groups as cvfg
 from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
@@ -180,7 +179,7 @@ def check_all_grids(image, cluster_list, corners):
         while j < len(cluster_list):
             c2, dir2 = cluster_list[j]
             # SHOULD HAVE CHECK BY PERPENDICULAR GROUPS, future improvement
-            score, intersect_list = fg.check_grid_like(c1, c2, image.shape, corners)
+            score, intersect_list = fg.check_grid_like(c1, c2, image.shape[:2], corners)
             clusters.append([cluster_list[i - 1]])
             clusters[-1].append(cluster_list[j])
             scores.append(score)
@@ -332,8 +331,9 @@ def detect_chessboard(image_name, thres_config):
                              sect_list[max_index],
                              line_by_pts,
                              corners,
-                             lines=lines,
-                             image=image)
+                             image.shape[:2],
+                             image=image,
+                             lines=lines)
     else:
         print("No valid grid found")
         print("Failed check_all_grids")
