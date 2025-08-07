@@ -202,6 +202,20 @@ def score_points(verified, all_sects, line_corners, corners):
     return point_system
 
 
+def rank_row(row, point_system):
+    """
+    Given a row of points, rank them by how related to the corners points they are.
+    We do this because there is a possiblity more then 9 row was created.
+    :param row:
+    :param point_system:
+    :return:
+    """
+    total_score = 0
+    for pts in row:
+       total_score += point_system[tuple(pts)]
+    return total_score
+
+
 def mask_9x9(verified, steps):
     """
     Insert artifical points into a copy of verified to get a full 9x9 to find the nearest neighbor of corners
@@ -209,7 +223,18 @@ def mask_9x9(verified, steps):
     :param steps:
     :return:
     """
-    mask = verified.copy()
+    mask = []
+    # If theres two many rows then needed, remove some rows that score relatively low
+    if len(verified) > 9:
+        amt_row_removed = len(verified) - 9
+        worst_rows = []
+        for i in range(len(verified)):
+            worst_rows.append((i, rank_row(verified[i])))
+        sorted(worst_rows, key=lambda x: x[1])
+        
+    else:
+        mask = verified.copy()
+
     for row in mask:
         if len(row) == 9:
             continue
