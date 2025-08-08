@@ -117,7 +117,7 @@ def hough_line_intersect(line, point, tolerance=2):
     return False
 
 
-def create_point_mask(pt1, pt2, x_d, y_d, include_origin_pts=False, bounds=(1000,1000)):
+def create_point_mask(pt1, pt2, x_d, y_d, include_origin_pts=False):
     """
     Helper function to create inserted points with the same steps given
     GPT rewriten to use numpy array instead of python list
@@ -126,7 +126,6 @@ def create_point_mask(pt1, pt2, x_d, y_d, include_origin_pts=False, bounds=(1000
     :param x_d: The x difference between the two points
     :param y_d: The y difference between the two points
     :param include_origin_pts: whether the mask points should include the inputted 2 points
-    :param bounds: Create the mask within the bounds of [0,0] - [n,n]
     :return:
     """
     pt1 = np.array(pt1)
@@ -145,14 +144,6 @@ def create_point_mask(pt1, pt2, x_d, y_d, include_origin_pts=False, bounds=(1000
     # generating points using diff offset
     before_pts = first - j * step
     after_pts = second + j * step
-
-    # only include points within bounds of image
-    bounds = np.array(bounds)
-    before_mask = np.all((before_pts >= 0) & (before_pts < bounds), axis=1)
-    after_mask = np.all((after_pts >= 0) & (after_pts < bounds), axis=1)
-
-    before_pts = before_pts[before_mask]
-    after_pts = after_pts[after_mask]
 
     before_pts = before_pts[::-1]
     if include_origin_pts:
