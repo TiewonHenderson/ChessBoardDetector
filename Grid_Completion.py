@@ -321,7 +321,7 @@ def fill_in_missing(row, points_tree, all_points, score_system, threshold=7):
     return best_mask
 
 
-def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts, threshold=7, prev_gap=None):
+def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts, threshold=7):
     """
     TO-DO
     Given a row of points, rank them by how related to the corners points they are.
@@ -334,8 +334,6 @@ def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts, th
     :param points_tree: corners list converted to a KDtree
     :param all_pts: The list of points used to create points_tree
     :param threshold: How close to the point to be accepted as the same point
-    :param prev_gap: The gap of the two verified points in order to be used as a reference when iterating through
-                     mask, it allows gauge of error
     :return:
     """
     def loop_check(indices, range_op):
@@ -358,11 +356,10 @@ def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts, th
 
     total_score = 0
     finalize_row = []
-    reference = prev_gap
     s, f = loop_check((true_index, -1), -1)
     total_score += s
     finalize_row = f[::-1]
-    s, f = loop_check((true_index, len(row)), 1)
+    s, f = loop_check((true_index + 1, len(row)), 1)
     total_score += s
     finalize_row.extend(f)
     return total_score, finalize_row
@@ -385,16 +382,15 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
                   is from previous rows.
     :return:
     """
-    def scoring_window(mask, step, start_index=7, score_system=score_system):
+    def scoring_window(mask, start_index=7, score_system=score_system):
         """
         Assumes mask is at least 9 points long (should be at least 10 in theory)
         :param mask:
-        :param steps: x and y offsets that were used to generate each point
         :param start_index: where the starting point should be, and expand out both ways if needed
         :param score_system:
         :return:
         """
-        window = [0, 8]
+        window = [0, 9]
         max_score = (0, None)
         while window[1] < len(mask):
             row_score, new_row = choose_best_row_mask(mask[window[0]:window[1]], start_index,
@@ -407,29 +403,9 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
         return max_score
 
     row_len = len(row)
-    if row == None or row_len == 0:
+    if row == None or row_len <= 1:
+        # Row too short
         return row
-    if row_len == 1:
-        # Row is too short, need predetermined steps
-        if steps is None:
-            return row
-        x_diff, y_diff = steps
-        x_0, y_0 = row[0]
-        extend_part = []
-        mask = []
-        # adds points in both directions
-        for j in range(1, 9):
-            pt_before = [x_0 - (j * x_diff), y_0 - (j * y_diff)]
-            pt_after = [x_0 + (j * x_diff), y_0 + (j * y_diff)]
-            mask.append(pt_before)
-            extend_part.append(pt_after)
-        # Before points are backwards, reverse then extend with afters points
-        mask = mask[::-1]
-        good_index = len(mask)
-        mask.append(row[0])
-        mask.extend(extend_part)
-        max_score = scoring_window(mask)
-        return max_score[1]
     if 2 <= row_len <= 4:
         """
         Two approaches:
@@ -443,13 +419,15 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
         for i in range(row_len - 1):
             diff = np.array(row[i]) - np.array(row[i + 1])
             x_d, y_d = diff[0], diff[1]
-            mask_list.append(hcd.create_point_mask(row[i], row[i + 1],
-                                                   x_d, y_d,
-                                                   True,
-                                                   (dim, dim)))
+            gen_mask = hcd.create_point_mask(row[i], row[i + 1],
+                                            x_d, y_d,
+                                            True,
+                                            (dim, dim))
+            if len(gen_mask) >= 9:
+                mask_list.append(gen_mask)
         max_score = (0, row)
         for mask in mask_list:
-            score_tuple = scoring_window(mask, (x_d, y_d))
+            score_tuple = scoring_window(mask)
             if score_tuple[0] > max_score[0]:
                 max_score = score_tuple
         return max_score[1]
@@ -459,25 +437,28 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
         get the min, median, max gap to interpolate
         points expected: 5-8
         """
-        min_d,med_d,max_d = get_best_dist_rep(row)
-        outer_pt_1, outer_pt_2 = row[0], row[-1]
-        new_min = [[],[]]
-        new_med = [[],[]]
-        new_max = [[],[]]
-        for i in range(1, abs(9 - row_len) + 1):
-            # add "previous" points
-            new_min[0].append((outer_pt_1[0] - min_d[0], outer_pt_1[1] - min_d[1]))
-            new_med[0].append((outer_pt_1[0] - med_d[0], outer_pt_1[1] - med_d[1]))
-            new_max[0].append((outer_pt_1[0] - max_d[0], outer_pt_1[1] - max_d[1]))
-            # add "next" points
-            new_min[1].append((outer_pt_1[0] + min_d[0], outer_pt_1[1] + min_d[1]))
-            new_med[1].append((outer_pt_1[0] + med_d[0], outer_pt_1[1] + med_d[1]))
-            new_max[1].append((outer_pt_1[0] + max_d[0], outer_pt_1[1] + max_d[1]))
+        outer_pt_1 = np.array(row[0])
+        outer_pt_2 = np.array(row[-1])
+        min_d, med_d, max_d = map(np.array, get_best_dist_rep(row))
+        num_steps = abs(9 - row_len)
+        steps = np.arange(1, num_steps + 1)[:, None]  # shape (num_steps, 1)
 
-        # Combine all points and score each window, return best row
-        min_mask = new_min[0][::-1] + row.copy() + new_min[1]
-        med_mask = new_min[0][::-1] + row.copy() + new_min[1]
-        max_mask = new_min[0][::-1] + row.copy() + new_min[1]
+        # Vectorized computation of previous and next points
+        new_min_prev = outer_pt_1 - min_d * steps
+        new_min_next = outer_pt_1 + min_d * steps
+
+        new_med_prev = outer_pt_1 - med_d * steps
+        new_med_next = outer_pt_1 + med_d * steps
+
+        new_max_prev = outer_pt_1 - max_d * steps
+        new_max_next = outer_pt_1 + max_d * steps
+
+        # Build masks without Python loops
+        row_np = np.array(row)
+
+        min_mask = np.vstack([new_min_prev[::-1], row_np, new_min_next])
+        med_mask = np.vstack([new_med_prev[::-1], row_np, new_med_next])
+        max_mask = np.vstack([new_max_prev[::-1], row_np, new_max_next])
 
         min_score = scoring_window(min_mask)
         med_score = scoring_window(med_mask)
@@ -591,10 +572,11 @@ def point_interpolate(group1, group2,
 
     final_grid = mask_9x9(verified, all_pt_tree, all_pts, score_system, h)
     flat_grid = [pt for row in final_grid for pt in row]
+    print("printing grid")
     for x in final_grid:
         print(x)
 
-    show_points(flat_verified, flat_grid, line_corners, corners, height=h, width=w, box=box)
+    show_points(flat_verified, flat_grid, height=h, width=w)
 
 
 def show_points(points, points_2=[], points_3=[], points_4=[],

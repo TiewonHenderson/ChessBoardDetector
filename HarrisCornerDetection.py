@@ -120,6 +120,7 @@ def hough_line_intersect(line, point, tolerance=2):
 def create_point_mask(pt1, pt2, x_d, y_d, include_origin_pts=False, bounds=(1000,1000)):
     """
     Helper function to create inserted points with the same steps given
+    GPT rewriten to use numpy array instead of python list
     :param pt1:
     :param pt2:
     :param x_d: The x difference between the two points
@@ -128,25 +129,37 @@ def create_point_mask(pt1, pt2, x_d, y_d, include_origin_pts=False, bounds=(1000
     :param bounds: Create the mask within the bounds of [0,0] - [n,n]
     :return:
     """
-    x0, y0 = pt1
-    x1, y1 = pt2
-    masking_pts = []
-    before_pts = []
-    # adds points in both directions
-    for j in range(1, 8):
-        pt_before = (x0 - (j * x_d), y0 - (j * y_d))
-        pt_after = (x1 + (j * x_d), y1 + (j * y_d))
-        if bounds[0] - 1 >= pt_before[0] >= 0 and bounds[1] - 1 >= pt_before[1] >= 0:
-            before_pts.append(pt_before)
-        if bounds[0] - 1 >= pt_after[0] >= 0 and bounds[1] - 1 >= pt_after[1] >= 0:
-            masking_pts.append(pt_after)
-    # Before points are backwards, reverse then extend with afters points
+    pt1 = np.array(pt1)
+    pt2 = np.array(pt2)
+    step = np.array([x_d, y_d])
+
+    # checks whether pt1 or pt2 should be first
+    pt1_c = pt1 + step
+    if np.array_equal(pt1_c, pt2):
+        first, second = pt1, pt2
+    else:
+        first, second = pt2, pt1
+
+    j = np.arange(1, 8)[:, None]
+
+    # generating points using diff offset
+    before_pts = first - j * step
+    after_pts = second + j * step
+
+    # only include points within bounds of image
+    bounds = np.array(bounds)
+    before_mask = np.all((before_pts >= 0) & (before_pts < bounds), axis=1)
+    after_mask = np.all((after_pts >= 0) & (after_pts < bounds), axis=1)
+
+    before_pts = before_pts[before_mask]
+    after_pts = after_pts[after_mask]
+
     before_pts = before_pts[::-1]
     if include_origin_pts:
-        before_pts.append(pt1)
-        before_pts.append(pt2)
-    before_pts.extend(masking_pts)
-    return before_pts
+        before_pts = np.vstack([before_pts, first, second])
+    mask_pts = np.vstack([before_pts, after_pts])
+
+    return mask_pts.tolist()
 
 
 def point_masking(points, min_gap, tolerance=5, needed_score=3):
