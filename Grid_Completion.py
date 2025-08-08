@@ -168,16 +168,30 @@ def get_best_dist_rep(points):
     """
     Gets a median of steps between x and y to be used for point interpolation
     :param points:
-    :return:
+    :return: min, med, and max distance between points values
     """
     points = np.array(points)
     if len(points) < 2:
         return None
     diffs = np.diff(points, axis=0)
-    step_x = np.median(diffs[:, 0])
-    step_y = np.median(diffs[:, 1])
+    sqre_dist = np.sum(diffs**2, axis=1)  # squared distances
 
-    return step_x, step_y
+    # Indices for min, max, and median
+    min_idx = np.argmin(sqre_dist)
+    max_idx = np.argmax(sqre_dist)
+    median_idx = np.argsort(sqre_dist)[len(sqre_dist)//2]
+    return (diffs[min_idx], diffs[median_idx], diffs[max_idx])
+
+
+def inverse_quadratic_score(dist, eps=5):
+    """
+    Uses Inverse Quadratic Decay formula in order see if the distance is good
+    However if distance is more then half towards the next point, its prob bad or grid is heavily skewed
+    :param dist:
+    :param eps:
+    :return:
+    """
+    return 1 / (1 + (dist / eps)**2)
 
 
 def top_k_neighbors(point, points_tree, k=5):
@@ -238,16 +252,12 @@ def score_points(flat_verified, all_sects, line_corners, corners, threshold=4):
         point_system[c_pt] = score
 
     all_pts = corners.copy()
-    # Uses O(1) search in key dict to see if sect is already in corners
-    for sect in all_sects:
-        if tuple(sect) in point_system:
-            continue
-        all_pts.append(sect)
 
     for sect in all_sects:
         sect_pt = tuple(sect)
         if sect_pt in point_system:
             continue
+        all_pts.append(sect)
         # Either verified or re-verified
         if tree_verified and tree_verified.query(c_pt)[0] <= threshold or\
            tree_line_corners and tree_line_corners.query(c_pt)[0] <= threshold:
@@ -257,46 +267,6 @@ def score_points(flat_verified, all_sects, line_corners, corners, threshold=4):
         point_system[sect_pt] = score
 
     return point_system, build_tree(all_pts), all_pts
-
-
-def inverse_quadratic_score(dist, step):
-    """
-    Uses Inverse Quadratic Decay formula in order see if the distance is good
-    However if distance is more then half towards the next point, its prob bad or grid is heavily skewed
-    :param dist:
-    :param step:
-    :return:
-    """
-    return 1 / (1 + (dist / step)**2)
-
-
-def rank_row(row, true_index, score_system, points_tree, steps):
-    """
-    TO-DO
-    Given a row of points, rank them by how related to the corners points they are.
-    We do this because there is a possiblity more then 9 row was created.
-    :param row:
-    :param true_index: The index of a verified point to start off
-    :param point_system:
-    :param corner_tree: corners list converted to a KDtree
-    :param steps: x and y offsets that were used to generate each point
-    :return:
-    """
-    total_score = 0
-
-    # Loop from good index to 0, allows for error adapting
-    for i in range(true_index - 1, -1, -1):
-        # Theses are nearest neighbor by distance squared
-        steps_sq = steps[0]**2 + steps[1]**2
-        steps_sq = max(math.isqrt(steps_sq), 1)
-        neighbor_indices, neighbor_dists = top_k_neighbors(pts, points_tree)
-        best_points = None
-        for dist in neighbor_dists:
-            if dist > (steps_sq + 1)//2:
-                continue
-        if best_points == None:
-            continue
-    return total_score
 
 
 def fill_in_missing(row, points_tree, all_points, score_system, threshold=7):
@@ -335,7 +305,10 @@ def fill_in_missing(row, points_tree, all_points, score_system, threshold=7):
             max_score = 0
             for j in range(len(neighbor_dists)):
                 pt_index = neighbor_indices[j]
-                pt_score = score_system[tuple(all_points[pt_index])]
+                if tuple(all_points[pt_index]) in score_system:
+                    pt_score = score_system[tuple(all_points[pt_index])]
+                else:
+                    pt_score = 1
                 final_pt_score = pt_score * inverse_quadratic_score(neighbor_dists[j], threshold)
                 if final_pt_score > max_score:
                     max_score = final_pt_score
@@ -343,13 +316,59 @@ def fill_in_missing(row, points_tree, all_points, score_system, threshold=7):
             mask_score += max_score
             current_mask.append(best_point)
         current_mask.append(tuple(p2))
-        show_points(current_mask, mask)
         if mask_score > best_mask[0]:
             best_mask = (mask_score, current_mask)
     return best_mask
 
 
-def get_row_mask(row, corner_tree, score_system, steps=None):
+def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts, threshold=7, prev_gap=None):
+    """
+    TO-DO
+    Given a row of points, rank them by how related to the corners points they are.
+    We do this because there is a possiblity more then 9 row was created.
+
+    could use prev_gap, but would require sqrt operations
+    :param row:
+    :param true_index: The index of a verified point to start off
+    :param score_system:
+    :param points_tree: corners list converted to a KDtree
+    :param all_pts: The list of points used to create points_tree
+    :param threshold: How close to the point to be accepted as the same point
+    :param prev_gap: The gap of the two verified points in order to be used as a reference when iterating through
+                     mask, it allows gauge of error
+    :return:
+    """
+    def loop_check(indices, range_op):
+        total_score = 0
+        finalize_row = []
+        # Loop from good index to 0, allows for error adapting
+        # Expected inclusive indices = [0,8]
+        for i in range(indices[0], indices[1], range_op):
+            neighbor_indices, neighbor_dists = top_k_neighbors(row[i], points_tree)
+            best_points = (0, row[i])
+            for i, dist in enumerate(neighbor_dists):
+                point = all_pts[neighbor_indices[i]]
+                score = score_system[point] * inverse_quadratic_score(dist)
+                if score > best_points[0]:
+                    best_points = (score, point)
+            total_score += best_points[0]
+            finalize_row.append(best_points[1])
+        finalize_row = finalize_row[::-1]
+        return total_score, finalize_row
+
+    total_score = 0
+    finalize_row = []
+    reference = prev_gap
+    s, f = loop_check((true_index, -1), -1)
+    total_score += s
+    finalize_row = f[::-1]
+    s, f = loop_check((true_index, len(row)), 1)
+    total_score += s
+    finalize_row.extend(f)
+    return total_score, finalize_row
+
+
+def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
     """
     Depending on how many points are within row, the masking process will be different:
     If len(row) <= 4, we would need to reconstruct the entire row.
@@ -358,35 +377,39 @@ def get_row_mask(row, corner_tree, score_system, steps=None):
     If len(row) > 4, despite the possibility of missing points inbetween, this is
     still the majority of points present, use it as reference and only expand outwards
     :param row:
-    :param corner_tree: corners list converted to a KDtree
+    :param points_tree: all points with a list converted to a KDtree
+    :param all_pts: All points that represents corners and intersections
     :param score_system:
+    :param dim: The dimension of the image, it should be 1:1 and default to 1000x1000
     :param steps: A fail safe for row being just 1 point, the only place you could get steps
                   is from previous rows.
     :return:
     """
-    def scoring_window(mask, start_index, step, score_system=score_system):
+    def scoring_window(mask, step, start_index=7, score_system=score_system):
         """
         Assumes mask is at least 9 points long (should be at least 10 in theory)
         :param mask:
-        :param start_index:
         :param steps: x and y offsets that were used to generate each point
+        :param start_index: where the starting point should be, and expand out both ways if needed
         :param score_system:
         :return:
         """
-        window = [0, 9]
+        window = [0, 8]
         max_score = (0, None)
         while window[1] < len(mask):
-            row_score = rank_row(mask[window[0]:window[1]], start_index,
-                                 point_system=score_system,
-                                 points_tree=points_tree)
-            if row_score > max_score:
-                max_score = (row_score, tuple(window))
+            row_score, new_row = choose_best_row_mask(mask[window[0]:window[1]], start_index,
+                                                      score_system=score_system,
+                                                      points_tree=points_tree,
+                                                      all_pts=all_pts)
+            if row_score > max_score[0]:
+                max_score = (row_score, new_row)
+            window = [window[0] + 1, window[1] + 1]
         return max_score
 
-
-    if row == None or len(row) == 0:
+    row_len = len(row)
+    if row == None or row_len == 0:
         return row
-    if len(row) == 1:
+    if row_len == 1:
         # Row is too short, need predetermined steps
         if steps is None:
             return row
@@ -407,24 +430,83 @@ def get_row_mask(row, corner_tree, score_system, steps=None):
         mask.extend(extend_part)
         max_score = scoring_window(mask)
         return max_score[1]
-
-    x_d, y_d = get_best_dist_rep(row)
-    if len(row) <= 4:
+    if 2 <= row_len <= 4:
         """
         Two approaches:
         1) Generate masking over pairs of points until suffices
+        
+        Seems filling in gaps might be worse
         2) Take the outer border of the current row, divide by 2-8 segments
            Fill in gaps if detected, then mask out
         """
-        mask_list = [hcd.create_point_mask(row[i], row[i + 1], x_d, y_d)]
+        mask_list = []
+        for i in range(row_len - 1):
+            diff = np.array(row[i]) - np.array(row[i + 1])
+            x_d, y_d = diff[0], diff[1]
+            mask_list.append(hcd.create_point_mask(row[i], row[i + 1],
+                                                   x_d, y_d,
+                                                   True,
+                                                   (dim, dim)))
+        max_score = (0, row)
+        for mask in mask_list:
+            score_tuple = scoring_window(mask, (x_d, y_d))
+            if score_tuple[0] > max_score[0]:
+                max_score = score_tuple
+        return max_score[1]
+    elif row_len < 9:
+        """
+        Approach:
+        get the min, median, max gap to interpolate
+        points expected: 5-8
+        """
+        min_d,med_d,max_d = get_best_dist_rep(row)
+        outer_pt_1, outer_pt_2 = row[0], row[-1]
+        new_min = [[],[]]
+        new_med = [[],[]]
+        new_max = [[],[]]
+        for i in range(1, abs(9 - row_len) + 1):
+            # add "previous" points
+            new_min[0].append((outer_pt_1[0] - min_d[0], outer_pt_1[1] - min_d[1]))
+            new_med[0].append((outer_pt_1[0] - med_d[0], outer_pt_1[1] - med_d[1]))
+            new_max[0].append((outer_pt_1[0] - max_d[0], outer_pt_1[1] - max_d[1]))
+            # add "next" points
+            new_min[1].append((outer_pt_1[0] + min_d[0], outer_pt_1[1] + min_d[1]))
+            new_med[1].append((outer_pt_1[0] + med_d[0], outer_pt_1[1] + med_d[1]))
+            new_max[1].append((outer_pt_1[0] + max_d[0], outer_pt_1[1] + max_d[1]))
 
+        # Combine all points and score each window, return best row
+        min_mask = new_min[0][::-1] + row.copy() + new_min[1]
+        med_mask = new_min[0][::-1] + row.copy() + new_min[1]
+        max_mask = new_min[0][::-1] + row.copy() + new_min[1]
 
+        min_score = scoring_window(min_mask)
+        med_score = scoring_window(med_mask)
+        max_score = scoring_window(max_mask)
 
-def mask_9x9(verified, steps):
+        return max([min_score, med_score, max_score], key=lambda x: x[0])[1]
+    else:
+        """
+        Any bigger row is just another version of sliding window, except a few of them
+        are misrepresented as verified points
+        
+        to-do ideas:
+            1) Outlier gaps between points, remove until 9 points is reached
+            2) DP the longest chain and expand by outer most points
+        
+        but for now, its unlikely removing an inner point will affect the homography too much
+        """
+        while len(row) > 9:
+            row.pop(len(row)//2)
+        return row
+
+def mask_9x9(verified, points_tree, all_pts, score_system, dim=1000):
     """
     Insert artifical points into a copy of verified to get a full 9x9 to find the nearest neighbor of corners
     :param verified: a matrix version of corner points, where points are in row
-    :param steps:
+    :param points_tree: all points with a list converted to a KDtree
+    :param all_pts: All points that represents corners and intersections
+    :param score_system:
+    :param dim: The dimension of the image, it should be 1:1 and default to 1000x1000
     :return:
     """
 
@@ -442,12 +524,17 @@ def mask_9x9(verified, steps):
     else:
         mask = verified.copy()
 
+    row_result = []
     for row in mask:
-        if len(row) == 9:
-            continue
-        elif len(row) > 9:
-            continue
+        row_result.append(get_row_mask(row, points_tree, all_pts, score_system))
 
+    transposed = [list(col) for col in zip(*row_result)]
+
+    final_grid = []
+    for col in transposed:
+        final_grid.append(get_row_mask(col, points_tree, all_pts, score_system))
+
+    return final_grid
 
 def point_interpolate(group1, group2,
                       sect_list, line_pts, corners,
@@ -467,10 +554,12 @@ def point_interpolate(group1, group2,
     """
     if group1 is None or group2 is None or len(group1) < 2 or len(group2) < 2:
         return None, None
-
+    h, w = image_shape
     corners = list(map(tuple, corners))
     verified, verified_lines = intersect_verification(sect_list, corners)
     flat_verified = [pt for row in verified for pt in row]
+    if len(flat_verified) <= 9:
+        return None, None
     g1 = []
     g2 = []
     """
@@ -490,23 +579,22 @@ def point_interpolate(group1, group2,
 
     all_sects, line_corners = get_points(sect_list, line_pts)
     score_system, all_pt_tree, all_pts = score_points(flat_verified, all_sects, line_corners, corners)
+    show_points(flat_verified, all_sects, line_corners, corners, height=h, width=w, box=box)
+
+    print(score_system)
+    print(all_pt_tree, "\nlen", all_pt_tree.n)
+    print(all_pts, "\nlen", len(all_pts))
 
     # for row in verified:
     #     print(row)
     #     show_points(row)
 
-    masked_grid = []
-    for row in verified:
-        masked_row = fill_in_missing(row, all_pt_tree, all_pts, score_system)
-        masked_grid.extend(masked_row[1])
+    final_grid = mask_9x9(verified, all_pt_tree, all_pts, score_system, h)
+    flat_grid = [pt for row in final_grid for pt in row]
+    for x in final_grid:
+        print(x)
 
-    # print(score_system)
-    # print(all_pt_tree, "\nlen", all_pt_tree.n)
-    # print(all_pts, "\nlen", len(all_pts))
-
-    show_points(masked_grid, box=box)
-    show_points(flat_verified, box=box)
-    show_points(flat_verified, all_sects, line_corners, corners, lines=lines, box=box)
+    show_points(flat_verified, flat_grid, line_corners, corners, height=h, width=w, box=box)
 
 
 def show_points(points, points_2=[], points_3=[], points_4=[],

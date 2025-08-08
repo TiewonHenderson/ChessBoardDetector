@@ -99,7 +99,7 @@ def harris(image, ksize, mask):
     return cluster_duplicates(corner_points, eps)
 
 
-def hough_line_intersect(line, point, tolerance=1):
+def hough_line_intersect(line, point, tolerance=2):
     """
     :param line: [rho, theta]
     :param point: [x, y]
@@ -117,13 +117,15 @@ def hough_line_intersect(line, point, tolerance=1):
     return False
 
 
-def create_point_mask(pt1, pt2, x_d, y_d):
+def create_point_mask(pt1, pt2, x_d, y_d, include_origin_pts=False, bounds=(1000,1000)):
     """
     Helper function to create inserted points with the same steps given
     :param pt1:
     :param pt2:
-    :param x_d:
-    :param y_d:
+    :param x_d: The x difference between the two points
+    :param y_d: The y difference between the two points
+    :param include_origin_pts: whether the mask points should include the inputted 2 points
+    :param bounds: Create the mask within the bounds of [0,0] - [n,n]
     :return:
     """
     x0, y0 = pt1
@@ -132,12 +134,17 @@ def create_point_mask(pt1, pt2, x_d, y_d):
     before_pts = []
     # adds points in both directions
     for j in range(1, 8):
-        pt_before = [x0 - (j * x_d), y0 - (j * y_d)]
-        pt_after = [x1 + (j * x_d), y1 + (j * y_d)]
-        before_pts.append(pt_before)
-        masking_pts.append(pt_after)
+        pt_before = (x0 - (j * x_d), y0 - (j * y_d))
+        pt_after = (x1 + (j * x_d), y1 + (j * y_d))
+        if bounds[0] - 1 >= pt_before[0] >= 0 and bounds[1] - 1 >= pt_before[1] >= 0:
+            before_pts.append(pt_before)
+        if bounds[0] - 1 >= pt_after[0] >= 0 and bounds[1] - 1 >= pt_after[1] >= 0:
+            masking_pts.append(pt_after)
     # Before points are backwards, reverse then extend with afters points
     before_pts = before_pts[::-1]
+    if include_origin_pts:
+        before_pts.append(pt1)
+        before_pts.append(pt2)
     before_pts.extend(masking_pts)
     return before_pts
 

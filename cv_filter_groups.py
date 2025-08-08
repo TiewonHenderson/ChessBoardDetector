@@ -202,7 +202,11 @@ def cv_clean_lines(lines, corners, direction, image_shape, image=None):
 
     # Gets intersections of each line to the perd_line, i to keep lines index intact
     # Sorts by x then y
-    sect_list = [(i, fg.intersection_polar_lines(perd_line, l)) for i, l in enumerate(lines)]
+    sect_list = []
+    for i, l in enumerate(lines):
+        sect = fg.intersection_polar_lines(perd_line, l)
+        if sect is not None:
+            sect_list.append((i, sect))
     sect_list = sorted(sect_list, key=lambda p: (p[1][0], p[1][1]))
 
     # Aligns lines to the intersections saved in sect_list

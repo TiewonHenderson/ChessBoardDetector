@@ -16,16 +16,9 @@ multiplier = a multipled value to an already constant epsilon
 (larger == more lenient)
 setting params are formatted as such:
 0) ksize             [constant]   (blur intensity, must be odd)
-1) edge_threshold1   [constant]   (Min threshold for edge to be a candidate)
-2) edge_threshold2   [constant]   (threshold for automatic edge detection)
-3) hline_thres       [constant]   (votes to accept a line)
-4) dir_eps
+1) dir_eps           [constant]   epsilon for vanishing point within that direction, how off the theta can be
 """
 ksize = 3
-edge_thres1 = 100
-edge_thres2 = 150
-hline_thres = 100
-
 dir_eps = {0: 0.3,
            45: 0.175,
            90: 0.1,
@@ -47,27 +40,17 @@ def image_load(image_name):
     # For original points when scaling back
     scale_factor_x = scale_factor_y = 1
     height, width, _ = image.shape
-    max_dim = 1000
-    if height > max_dim or width > max_dim:
+    needed_dim = 1000
+    if height != needed_dim or width != needed_dim:
         # Calculate scaling factor, to maintain aspect ratio
-        scale_factor = min(max_dim / width, max_dim / height)
-
-        new_width = int(width * scale_factor)
-        new_height = int(height * scale_factor)
+        width_fac = needed_dim / width
+        height_fac = needed_dim / height
 
         old_image = image.copy()
-        image = cv2.resize(image, (new_width, new_height))
+        image = cv2.resize(image, (needed_dim, needed_dim))
 
-        scale_factor_x = new_width / old_image.shape[1]
-        scale_factor_y = new_height / old_image.shape[0]
-    # Need 1:1 aspect ratio
-    elif height/width != 1:
-        size = max(height, width)
-        old_image = image.copy()
-        image = cv2.resize(image, (size, size))
-
-        scale_factor_x *= size / width
-        scale_factor_y *= size / height
+        scale_factor_x = needed_dim / old_image.shape[1]
+        scale_factor_y = needed_dim / old_image.shape[0]
 
     return image, old_image, (scale_factor_x, scale_factor_y)
 
@@ -104,7 +87,8 @@ def houghLine_detect(image_shape, edges, corners, mask=None, threshold=4):
     if mask is not None:
         # Remove edges where mask is set as 0
         e[mask == 0] = 0
-    lines = ht.unpack_hough(cv2.HoughLines(e, 1, 0.0175, threshold=threshold))
+    lines = ht.unpack_hough(cv2.HoughLines(e, 1, np.pi/360, threshold=threshold))
+    lines = [(round(rho,3), round(theta,3)) for rho, theta in lines]
     lines = fg.filter_similar_lines(lines, image_shape)
     if corners is not None:
         lines, pt_by_line = hcd.filter_hough_lines_by_corners(lines, corners, min_gap)
@@ -150,7 +134,7 @@ def cluster_lines(image, lines, corners, gap_eps, corner=[]):
         # print("after")
         # find_exact_line(image, clean_lines, -1, green=True)
 
-        final_clusters.append((clean_lines, new_dir))
+        final_clusters.append((clean_lines, dir))
     return final_clusters
 
 
@@ -246,16 +230,13 @@ def find_exact_line(image, lines, index, corners=[], green=True):
     ht.show_images(img)
 
 
-
-def detect_chessboard(image_name, thres_config):
+def detect_chessboard(image_name, ksize):
     """
-
     :param image_name:
     :param thres_config:
     :return: An image with
     """
 
-    ksize, edge_thres1, edge_thres2, hline_thres = thres_config
     image, origin_img, image_scale = image_load(image_name)
     if origin_img is None:
         origin_img = image
@@ -288,7 +269,8 @@ def detect_chessboard(image_name, thres_config):
     for x, y in corners:
         x = int(x)
         y = int(y)
-        binary_map[y, x] = 255
+        if (width - 1) > x > 0 and (height - 1) > y > 0:
+            binary_map[y, x] = 255
 
     lines, line_by_pts = houghLine_detect([height, width],
                                                     binary_map,
@@ -296,6 +278,7 @@ def detect_chessboard(image_name, thres_config):
                                                     mask,
                                                     3)
     find_exact_line(image, lines, 0, corners=corners, green=False)
+
     # lines = sorted(lines, key=lambda x: x[1])
     # for i in range(len(lines)):
     #     print(i, lines[i])
@@ -305,8 +288,8 @@ def detect_chessboard(image_name, thres_config):
         print("Not enough lines for a grid")
         print("Failed houghline!!!")
         return None
-    clusters = cluster_lines(image, lines, corners, gap_eps, corners)
 
+    clusters = cluster_lines(image, lines, corners, gap_eps, corners)
     final_lines, scores, sect_list = check_all_grids(image, clusters, corners)
 
     if len(scores) > 0 and len(final_lines) > 0:
@@ -318,8 +301,8 @@ def detect_chessboard(image_name, thres_config):
         g1_lines, g1_dir = g1_data
         g2_lines, g2_dir = g2_data
 
-        # print("score", scores[max_index])
-        # find_exact_line(image, g1[0] + g2[0], 0, corners=corners, green=False)
+        print("score", scores[max_index])
+        find_exact_line(image, g1_lines + g2_lines, 0, green=False)
 
         """
         sect_list = the intersection between the two groups represented as points
@@ -380,7 +363,6 @@ def main():
              "Taken_Photos/left,rotated,random,65angle.png"
             ]
 
-    thres_config = (ksize, edge_thres1, edge_thres2, hline_thres)
     # for j in range(len(easy)):
     #     detected = detect_chessboard(easy[j], thres_config, scalar_config, i)
     #     print('done: ', i)
@@ -388,7 +370,7 @@ def main():
     #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
     #     print('done: ', i)
     for j in range(len(test1)):
-        detect_chessboard(test1[j], thres_config)
+        detect_chessboard(test1[j], ksize)
 
 
 if __name__ == "__main__":
