@@ -484,14 +484,13 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
         points expected: 5-8
         """
         _, new_row = fill_in_missing(row, points_tree, all_pts, score_system)
-        print(new_row)
+        print("new row", new_row)
         if len(new_row) == 9:
-            return new_row
+            return list(map(tuple, new_row.astype(int)))
         elif len(new_row) > 9:
             while len(new_row) > 9:
                 new_row.pop(len(new_row) // 2)
-            return new_row
-        print("new row", new_row)
+            return list(map(tuple, new_row.astype(int)))
         outer_pt_1 = np.array(new_row[0])
         outer_pt_2 = np.array(new_row[-1])
         min_d, med_d, max_d = map(np.array, get_best_dist_rep(new_row))
@@ -520,13 +519,13 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
         max_mask = filter_in_bounds(max_mask)
 
         # min_score is the fall back, every other mask needs to be valid and decent scoring
-        min_score = scoring_window(list(map(tuple, min_mask)))
+        min_score = scoring_window(list(map(tuple, min_mask.astype(int))))
         if len(med_mask) >= 9:
-            med_score = scoring_window(list(map(tuple, med_mask)))
+            med_score = scoring_window(list(map(tuple, med_mask.astype(int))))
         else:
             med_score = (-1, [])
         if len(max_mask) >= 9:
-            max_score = scoring_window(list(map(tuple, max_mask)))
+            max_score = scoring_window(list(map(tuple, max_mask.astype(int))))
         else:
             max_score = (-1, [])
 
