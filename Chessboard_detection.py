@@ -303,7 +303,7 @@ def detect_chessboard(image_name, ksize):
                                                     edges,
                                                     corners,
                                                     mask,
-                                                    100)
+                                                    threshold=max(height, width)//10)
     find_exact_line(image, lines, 0, corners=corners, green=False)
 
     # lines = sorted(lines, key=lambda x: x[1])
@@ -327,15 +327,6 @@ def detect_chessboard(image_name, ksize):
         g1_data, g2_data = final_lines[max_index]
         g1_lines, g1_dir = g1_data
         g2_lines, g2_dir = g2_data
-
-        g1_lines_pts, g2_lines_pts = lc.get_outer_points(g1_lines, g2_lines, (height,width))
-
-        for x in g1_lines_pts:
-            print(x)
-        print("g2")
-        for x in g2_lines_pts:
-            print(x)
-        print("score", scores[max_index])
         find_exact_line(image, g1_lines + g2_lines, 0, green=False)
 
         """
@@ -343,14 +334,14 @@ def detect_chessboard(image_name, ksize):
         line_pts = the intersection between lines and corner points
         corners = all corner points found by a corner detection function
         """
-        # gc.point_interpolate(g1_lines,
-        #                      g2_lines,
-        #                      sect_list[max_index],
-        #                      line_by_pts,
-        #                      corners,
-        #                      image.shape[:2],
-        #                      image=image,
-        #                      lines=lines)
+        gc.point_interpolate(g1_lines,
+                             g2_lines,
+                             sect_list[max_index],
+                             line_by_pts,
+                             corners,
+                             image.shape[:2],
+                             image=image,
+                             lines=lines)
     else:
         print("No valid grid found")
         print("Failed check_all_grids")
@@ -392,11 +383,11 @@ def main():
     # for j in range(len(medium)):
     #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
     #     print('done: ', i)
-    # for j in range(2, len(taken_files)):
-    #     detect_chessboard(os.path.join(taken, taken_files[j]), ksize)
+    for j in range(len(taken_files)):
+        detect_chessboard(os.path.join(taken, taken_files[j]), ksize)
 
-    for j in range(len(hard)):
-        detect_chessboard(hard[j], ksize)
+    # for j in range(len(medium)):
+    #     detect_chessboard(medium[j], ksize)
 
 
 if __name__ == "__main__":

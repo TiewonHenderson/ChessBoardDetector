@@ -286,12 +286,11 @@ def score_points(flat_verified, all_sects, line_corners, corners, threshold=4):
     return point_system, build_tree(all_pts), all_pts
 
 
-def fill_in_missing(row, points_tree, all_points, score_system, threshold=7):
+def fill_in_missing(row, points_tree, all_points, score_system, dist_eps=0.1):
     """
     :param row: 2d array of verified points
     :param points_tree: KDtree of all_points in order to even access the points
     :param all_points: all_points that are relative, corners, intersections, etc.
-    :param score_system:
     :return:
     """
     if row is None or len(row) <= 1:
@@ -309,28 +308,32 @@ def fill_in_missing(row, points_tree, all_points, score_system, threshold=7):
         mask = [p1 + step * i for i in range(1, total_points - 1)]  # Skip the end points
         mask_list.append(mask)
 
-    best_mask = (0, None)
+    best_mask = (14 * len(row), row)
     for i, mask in enumerate(mask_list):
         current_mask = [tuple(p1)]
-        # Default score of 48 since it includes the two verified end points
-        mask_score = 48
+        # Default score of 28 since it includes the two verified end points
+        mask_score = 28
         for pts in mask:
             neighbor_indices, neighbor_dists = top_k_neighbors(pts, points_tree)
             """
             distance scoring formula 
             """
-            best_point = None
+            best_point = tuple(pts)
             max_score = 0
             for j in range(len(neighbor_dists)):
                 pt_index = neighbor_indices[j]
-                if tuple(all_points[pt_index]) in score_system:
-                    pt_score = score_system[tuple(all_points[pt_index])]
+                point = tuple(all_points[pt_index])
+                dist_score = inverse_quadratic_score(neighbor_dists[j])
+                if dist_score < dist_eps:
+                    continue
+                if point in score_system:
+                    pt_score = score_system[point]
                 else:
                     pt_score = 1
-                final_pt_score = pt_score * inverse_quadratic_score(neighbor_dists[j], threshold)
+                final_pt_score = pt_score * dist_score
                 if final_pt_score > max_score:
                     max_score = final_pt_score
-                    best_point = tuple(map(int, all_points[pt_index]))
+                    best_point = tuple(map(int, point))
             mask_score += max_score
             current_mask.append(best_point)
         current_mask.append(tuple(p2))
@@ -340,7 +343,7 @@ def fill_in_missing(row, points_tree, all_points, score_system, threshold=7):
 
 
 def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts,
-                         threshold=7, bounds=(1000,1000), dist_eps=0.1):
+                         bounds=(1000,1000), dist_eps=0.1):
     """
     TO-DO
     Given a row of points, rank them by how related to the corners points they are.
@@ -352,7 +355,6 @@ def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts,
     :param score_system:
     :param points_tree: corners list converted to a KDtree
     :param all_pts: The list of points used to create points_tree
-    :param threshold: How close to the point to be accepted as the same point
     :param dist_eps: scaling offset the distance between the mask point to the corner point to be accepted/too far
     :return:
     """
@@ -366,7 +368,7 @@ def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts,
             if out_of_bounds(row[i]):
                 return -1, []
             neighbor_indices, neighbor_dists = top_k_neighbors(row[i], points_tree)
-            best_points = (0, row[i])
+            best_points = (1, row[i])
             for i, dist in enumerate(neighbor_dists):
                 point = all_pts[neighbor_indices[i]]
                 dist_score = inverse_quadratic_score(dist)
@@ -396,6 +398,29 @@ def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts,
     return total_score, finalize_row
 
 
+def scoring_window(mask, points_tree, all_pts, score_system, start_index=7):
+    """
+    Assumes mask is at least 9 points long (should be at least 10 in theory)
+    :param mask:
+    :param points_tree: all points with a list converted to a KDtree
+    :param all_pts: All points that represents corners and intersections
+    :param score_system:
+    :param start_index: where the starting point should be, and expand out both ways if needed
+    :return:
+    """
+    window = [0, 9]
+    max_score = (0, None)
+    while window[1] < len(mask):
+        row_score, new_row = choose_best_row_mask(mask[window[0]:window[1]], start_index,
+                                                  score_system=score_system,
+                                                  points_tree=points_tree,
+                                                  all_pts=all_pts)
+        if row_score > max_score[0]:
+            max_score = (row_score, new_row, window.copy())
+        window = [window[0] + 1, window[1] + 1]
+    return max_score
+
+
 def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
     """
     Depending on how many points are within row, the masking process will be different:
@@ -409,29 +434,9 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
     :param all_pts: All points that represents corners and intersections
     :param score_system:
     :param dim: The dimension of the image, it should be 1:1 and default to 1000x1000
-    :param steps: A fail safe for row being just 1 point, the only place you could get steps
-                  is from previous rows.
+    :param steps: In respect to the previous interpolate, the following rows will do the same
     :return:
     """
-    def scoring_window(mask, start_index=7, score_system=score_system):
-        """
-        Assumes mask is at least 9 points long (should be at least 10 in theory)
-        :param mask:
-        :param start_index: where the starting point should be, and expand out both ways if needed
-        :param score_system:
-        :return:
-        """
-        window = [0, 9]
-        max_score = (0, None)
-        while window[1] < len(mask):
-            row_score, new_row = choose_best_row_mask(mask[window[0]:window[1]], start_index,
-                                                      score_system=score_system,
-                                                      points_tree=points_tree,
-                                                      all_pts=all_pts)
-            if row_score > max_score[0]:
-                max_score = (row_score, new_row)
-            window = [window[0] + 1, window[1] + 1]
-        return max_score
 
     def filter_in_bounds(points, bounds=(dim,dim)):
         """
@@ -447,6 +452,7 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
             ]
 
     row_len = len(row)
+    # Cannot use same points to represent multiple (cause of duplication)
     if row == None or row_len <= 1:
         # Row too short
         return row
@@ -468,12 +474,11 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
             gen_mask = hcd.create_point_mask(row[i], row[i + 1],
                                             x_d, y_d,
                                             True)
-            print("gen mask", gen_mask)
             if len(gen_mask) >= 9:
                 mask_list.append(gen_mask)
         max_score = (0, row)
         for mask in mask_list:
-            score_tuple = scoring_window(mask)
+            score_tuple = scoring_window(mask, points_tree, all_pts, score_system)
             if score_tuple[0] > max_score[0]:
                 max_score = score_tuple
         return max_score[1]
@@ -485,7 +490,6 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
         points expected: 5-8
         """
         _, new_row = fill_in_missing(row, points_tree, all_pts, score_system)
-        print("new row", new_row)
         if len(new_row) == 9:
             return new_row
         elif len(new_row) > 9:
@@ -494,44 +498,22 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
             return new_row
         outer_pt_1 = np.array(new_row[0])
         outer_pt_2 = np.array(new_row[-1])
-        min_d, med_d, max_d = map(np.array, get_best_dist_rep(new_row))
-        num_steps = abs(9 - row_len)
+        all_dist = np.diff(new_row, axis=0)
+        num_steps = abs(9 - len(new_row))
         steps = np.arange(1, num_steps + 1)[:, None]  # shape (num_steps, 1)
-
-        # Vectorized computation of previous and next points
-        new_min_prev = outer_pt_1 - min_d * steps
-        new_min_next = outer_pt_2 + min_d * steps
-
-        new_med_prev = outer_pt_1 - med_d * steps
-        new_med_next = outer_pt_2 + med_d * steps
-
-        new_max_prev = outer_pt_1 - max_d * steps
-        new_max_next = outer_pt_2 + max_d * steps
-
-        # Build masks without Python loops
-        row_np = np.array(new_row)
-
-        # Add all points together (ordered IF row is sorted)
-        min_mask = np.vstack([new_min_prev[::-1], row_np, new_min_next])
-        med_mask = np.vstack([new_med_prev[::-1], row_np, new_med_next])
-        max_mask = np.vstack([new_max_prev[::-1], row_np, new_max_next])
-
-        med_mask = filter_in_bounds(med_mask)
-        max_mask = filter_in_bounds(max_mask)
-
-        # min_score is the fall back, every other mask needs to be valid and decent scoring
-        min_score = scoring_window(list(map(tuple, min_mask.astype(int))))
-        if len(med_mask) >= 9:
-            med_score = scoring_window(list(map(tuple, med_mask.astype(int))))
-        else:
-            med_score = (-1, [])
-        if len(max_mask) >= 9:
-            max_score = scoring_window(list(map(tuple, max_mask.astype(int))))
-        else:
-            max_score = (-1, [])
-        best_mask = max([min_score, med_score, max_score], key=lambda x: x[0])[1]
-        print("pts >= 5 got mask", best_mask)
-        return best_mask
+        best_mask = (-1, None)
+        for dist in all_dist:
+            new_prev = outer_pt_1 - dist * steps
+            new_next = outer_pt_2 + dist * steps
+            row_np = np.array(new_row)
+            cand_mask = np.vstack([new_prev[::-1], row_np, new_next])
+            cand_mask = filter_in_bounds(cand_mask)
+            if len(cand_mask) < 9:
+                continue
+            mask_score = scoring_window(list(map(tuple, cand_mask.astype(int))), points_tree, all_pts, score_system)
+            if mask_score[0] > best_mask[0]:
+                best_mask = mask_score
+        return best_mask[1]
     else:
         """
         Any bigger row is just another version of sliding window, except a few of them
@@ -546,6 +528,7 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
         while len(row) > 9:
             row.pop(len(row)//2)
         return row
+
 
 def mask_9x9(verified, points_tree, all_pts, score_system, dim=1000):
     """
@@ -575,32 +558,20 @@ def mask_9x9(verified, points_tree, all_pts, score_system, dim=1000):
         mask = [verified[i] for i, _ in worst_rows]
     else:
         mask = verified.copy()
-
     row_result = []
     for row in mask:
         row_result.append(sort_points_by_range(get_row_mask(row, points_tree, all_pts, score_system)))
 
-    print("result rows")
-    for x in row_result:
-        show_points(x)
-        print(x)
-
     transposed = [sort_points_by_range(list(col)) for col in zip(*row_result)]
     flat_grid = [pt for row in transposed for pt in row]
     show_points([],[],flat_grid)
-    print("result transposed")
-    for x in transposed:
-        show_points(x)
-        print(x)
 
     final_grid = []
     for col in transposed:
         final_grid.append(get_row_mask(col, points_tree, all_pts, score_system))
 
-    print("result final")
-    for x in final_grid:
-        print(x)
     return final_grid
+
 
 def point_interpolate(group1, group2,
                       sect_list, line_pts, corners,
@@ -620,9 +591,10 @@ def point_interpolate(group1, group2,
     """
     if group1 is None or group2 is None or len(group1) < 2 or len(group2) < 2:
         return None, None
-    h, w = image_shape
+    height, width = image_shape
     corners = list(map(tuple, corners))
     verified, verified_lines = intersect_verification(sect_list, corners)
+    all_sects, line_corners = get_points(sect_list, line_pts)
     flat_verified = [pt for row in verified for pt in row]
     if len(flat_verified) <= 9:
         return None, None
@@ -643,20 +615,24 @@ def point_interpolate(group1, group2,
     dimension = ceil(sqrt(len(flat_verified)))
     missing_amt = abs(len(flat_verified) - dimension**2)
 
-    all_sects, line_corners = get_points(sect_list, line_pts)
     score_system, all_pt_tree, all_pts = score_points(flat_verified, all_sects, line_corners, corners)
-    show_points(flat_verified, all_sects, line_corners, corners, height=h, width=w)
+    show_points(flat_verified, all_sects, line_corners, corners, height=height, width=width)
 
     for row in verified:
         print(row)
 
-    final_grid = mask_9x9(verified, all_pt_tree, all_pts, score_system, h)
+    """
+    Old grid interpolation by rows of points
+    """
+    final_grid = mask_9x9(verified, all_pt_tree, all_pts, score_system, height)
     flat_grid = [pt for row in final_grid for pt in row]
     if len(flat_grid) != 81:
         print("Failed points")
         return None
-    show_points([], flat_grid, height=h, width=w)
-    h_grid = ransac_grids(final_grid, h)
+    show_points([], flat_grid, height=height, width=width)
+
+
+    h_grid = ransac_grids(final_grid, height)
     show_points([], flat_grid, h_grid, image=image, thickness=2)
 
 
@@ -675,7 +651,10 @@ def ransac_grids(grid_mask, dim=1000, threshold=5):
         for x in range(9)
     ], dtype=np.float32)  # Shape (81, 2)
 
-    src_points = [pt for row in grid_mask for pt in row]
+    if len(grid_mask) == 9:
+        src_points = [pt for row in grid_mask for pt in row]
+    else:
+        src_points = grid_mask
     src_points = np.array(src_points, dtype=np.float32)
     dst_points = np.array(dst_grid, dtype=np.float32)
 
