@@ -122,26 +122,13 @@ def get_intervals(gap_list, gap_stats, max_gap, min_gap):
         # In theory we can use gap_list again, but it requires a lot of operations to keep track
         # Since gap_list is so dynamic its not worth using a static one
         gap = round(gap_list[i], 4)
-        if gap > max_gap or (abs(gap - mean) > 3.5 * std_dev and gap > med):
+        if gap > max_gap or (abs(gap - med) > 3.5 * mad and gap > med):
             # Likely different interval if lines with same vp
             z_score = abs((gap - med) / mad)
             if can_add(i):
                 intervals[-1].append([i])
             if z_score > 3.5:
                 intervals.append([])
-        elif gap < min_gap or (abs(gap - mean) > 3.5 * std_dev and gap < med):
-            # Overlapping line belong to the same SET
-            # Same interval line belong to the same LIST
-            if prev_gap or len(intervals[-1]) == 0:
-                intervals[-1].append([])
-            if can_add(i):
-                intervals[-1][-1].append(i)
-            intervals[-1][-1].append(i + 1)
-            if i == len(gap_list) - 1:
-                combine_last = True
-            prev_gap = False
-            i += 1
-            continue
         else:
             if can_add(i):
                 intervals[-1].append([i])

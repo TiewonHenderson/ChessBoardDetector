@@ -209,3 +209,23 @@ def line_to_rho_theta(m, b):
     rho = -C / np.sqrt(A**2 + B**2)  # distance to origin
 
     return rho, theta
+
+"""
+Functions below were taken from stack overflow by user:
+https://stackoverflow.com/users/18078/david-leppik
+
+stack overflow prompt:
+https://stackoverflow.com/questions/22057940/
+how-to-get-coordinates-of-end-points-in-cartesian-coordinate-system-and-the-corr
+"""
+def y_for_line(x, r, theta):
+    if theta == 0:
+        return None
+    return (r - (x * np.cos(theta))) / np.sin(theta)
+
+
+def x_for_line(y, r, theta):
+    cos_theta = np.cos(theta)
+    if cos_theta == 0:
+        return None
+    return (r - (y * np.sin(theta))) / cos_theta

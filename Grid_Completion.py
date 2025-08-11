@@ -117,7 +117,7 @@ def sort_points_by_range(points):
     else:
         sorted_indices = np.lexsort((x_coords, y_coords))
     sorted_points = points[sorted_indices]
-    return sorted_points
+    return sorted_points.tolist()
 
 
 def hough_line_intersect(line, point):
@@ -299,12 +299,12 @@ def fill_in_missing(row, points_tree, all_points, score_system, threshold=7):
     if len(row) >= 9:
         # Take to face value
         return (-1, row)
-    p1 = np.array(row[0], dtype=float)
-    p2 = np.array(row[-1], dtype=float)
+    p1 = np.array(row[0], dtype=int)
+    p2 = np.array(row[-1], dtype=int)
     mask_list = []
     step_list = []
     # Iterate WITH the current amount of points in mind
-    for total_points in range(len(row) + 1, 10):  # From 3 to 9 inclusive
+    for total_points in range(len(row) + 1, 10):  # can range from 3 to 9 inclusive
         step = (p2 - p1) / (total_points - 1)
         mask = [p1 + step * i for i in range(1, total_points - 1)]  # Skip the end points
         mask_list.append(mask)
@@ -330,7 +330,7 @@ def fill_in_missing(row, points_tree, all_points, score_system, threshold=7):
                 final_pt_score = pt_score * inverse_quadratic_score(neighbor_dists[j], threshold)
                 if final_pt_score > max_score:
                     max_score = final_pt_score
-                    best_point = all_points[pt_index]
+                    best_point = tuple(map(int, all_points[pt_index]))
             mask_score += max_score
             current_mask.append(best_point)
         current_mask.append(tuple(p2))
@@ -381,7 +381,7 @@ def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts,
                 if score > best_points[0]:
                     best_points = (score, point)
             total_score += best_points[0]
-            finalize_row.append(best_points[1])
+            finalize_row.append(tuple(best_points[1]))
         finalize_row = finalize_row[::-1]
         return total_score, finalize_row
 
@@ -389,7 +389,7 @@ def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts,
     finalize_row = []
     s, f = loop_check((true_index, -1), -1)
     total_score += s
-    finalize_row = f[::-1]
+    finalize_row = f
     s, f = loop_check((true_index + 1, len(row)), 1)
     total_score += s
     finalize_row.extend(f)
@@ -468,6 +468,7 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
             gen_mask = hcd.create_point_mask(row[i], row[i + 1],
                                             x_d, y_d,
                                             True)
+            print("gen mask", gen_mask)
             if len(gen_mask) >= 9:
                 mask_list.append(gen_mask)
         max_score = (0, row)
@@ -486,11 +487,11 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
         _, new_row = fill_in_missing(row, points_tree, all_pts, score_system)
         print("new row", new_row)
         if len(new_row) == 9:
-            return list(map(tuple, new_row.astype(int)))
+            return new_row
         elif len(new_row) > 9:
             while len(new_row) > 9:
                 new_row.pop(len(new_row) // 2)
-            return list(map(tuple, new_row.astype(int)))
+            return new_row
         outer_pt_1 = np.array(new_row[0])
         outer_pt_2 = np.array(new_row[-1])
         min_d, med_d, max_d = map(np.array, get_best_dist_rep(new_row))
@@ -528,8 +529,9 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
             max_score = scoring_window(list(map(tuple, max_mask.astype(int))))
         else:
             max_score = (-1, [])
-
-        return max([min_score, med_score, max_score], key=lambda x: x[0])[1]
+        best_mask = max([min_score, med_score, max_score], key=lambda x: x[0])[1]
+        print("pts >= 5 got mask", best_mask)
+        return best_mask
     else:
         """
         Any bigger row is just another version of sliding window, except a few of them
@@ -548,6 +550,10 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
 def mask_9x9(verified, points_tree, all_pts, score_system, dim=1000):
     """
     Insert artifical points into a copy of verified to get a full 9x9 to find the nearest neighbor of corners
+
+    To-Do:
+    Needs improvement in order to not include duplicate points
+
     :param verified: a matrix version of corner points, where points are in row
     :param points_tree: all points with a list converted to a KDtree
     :param all_pts: All points that represents corners and intersections
@@ -572,17 +578,19 @@ def mask_9x9(verified, points_tree, all_pts, score_system, dim=1000):
 
     row_result = []
     for row in mask:
-        row_result.append(get_row_mask(row, points_tree, all_pts, score_system))
+        row_result.append(sort_points_by_range(get_row_mask(row, points_tree, all_pts, score_system)))
 
     print("result rows")
     for x in row_result:
+        show_points(x)
         print(x)
 
-    transposed = [list(col) for col in zip(*row_result)]
+    transposed = [sort_points_by_range(list(col)) for col in zip(*row_result)]
     flat_grid = [pt for row in transposed for pt in row]
     show_points([],[],flat_grid)
     print("result transposed")
     for x in transposed:
+        show_points(x)
         print(x)
 
     final_grid = []
@@ -637,22 +645,55 @@ def point_interpolate(group1, group2,
 
     all_sects, line_corners = get_points(sect_list, line_pts)
     score_system, all_pt_tree, all_pts = score_points(flat_verified, all_sects, line_corners, corners)
-    show_points(flat_verified, all_sects, line_corners, corners, height=h, width=w, box=box)
-
-    # print(score_system)
-    # print(all_pt_tree, "\nlen", all_pt_tree.n)
-    # print(all_pts, "\nlen", len(all_pts))
+    show_points(flat_verified, all_sects, line_corners, corners, height=h, width=w)
 
     for row in verified:
         print(row)
 
     final_grid = mask_9x9(verified, all_pt_tree, all_pts, score_system, h)
     flat_grid = [pt for row in final_grid for pt in row]
-    show_points(flat_verified, flat_grid, height=h, width=w)
+    if len(flat_grid) != 81:
+        print("Failed points")
+        return None
+    show_points([], flat_grid, height=h, width=w)
+    h_grid = ransac_grids(final_grid, h)
+    show_points([], flat_grid, h_grid, image=image, thickness=2)
+
+
+def ransac_grids(grid_mask, dim=1000, threshold=5):
+    """
+    GPT generated
+    :param grid_mask:
+    :param dim: The dimension of the image
+    :param threshold:
+    :return:
+    """
+    grid_space = dim/10
+    dst_grid = np.array([
+        [grid_space + (grid_space * 0.8) * x, grid_space + (grid_space * 0.8) * y]
+        for y in range(9)
+        for x in range(9)
+    ], dtype=np.float32)  # Shape (81, 2)
+
+    src_points = [pt for row in grid_mask for pt in row]
+    src_points = np.array(src_points, dtype=np.float32)
+    dst_points = np.array(dst_grid, dtype=np.float32)
+
+    H, inliers = cv2.findHomography(
+        dst_points,             # points from the distorted image (your detected/masked points)
+        src_points,             # perfect reference grid points
+        cv2.RANSAC,
+        threshold
+    )
+
+    full_grid_projected = cv2.perspectiveTransform(dst_grid.reshape(-1, 1, 2), H)
+    full_grid_projected = full_grid_projected.reshape(-1, 2)
+    full_grid_tuples = [tuple(map(int, pt)) for pt in full_grid_projected]
+    return full_grid_tuples
 
 
 def show_points(points, points_2=[], points_3=[], points_4=[],
-                height=1000, width=1000, image=None, lines=None, box=None):
+                height=1000, width=1000, image=None, lines=None, box=None, thickness=1):
     """
     for displaying, not useful for true corners
     :param points:
@@ -684,12 +725,12 @@ def show_points(points, points_2=[], points_3=[], points_4=[],
         cv2.circle(use_image, (int(x), int(y)), radius=2, color=(255, 255, 255), thickness=-1)
     # Green for first `points_2`
     for x, y in points_2:
-        cv2.circle(use_image, (int(x), int(y)), radius=5, color=(0, 255, 0), thickness=1)
+        cv2.circle(use_image, (int(x), int(y)), radius=5, color=(0, 255, 0), thickness=thickness)
     # Yellow for second `points_2`
     for x, y in points_3:
-        cv2.circle(use_image, (int(x), int(y)), radius=8, color=(0, 255, 255), thickness=1)
+        cv2.circle(use_image, (int(x), int(y)), radius=8, color=(0, 255, 255), thickness=thickness)
     for x, y in points_4:
-        cv2.circle(use_image, (int(x), int(y)), radius=12, color=(100, 100, 100), thickness=1)
+        cv2.circle(use_image, (int(x), int(y)), radius=12, color=(100, 100, 100), thickness=thickness)
 
 
     # Show the image

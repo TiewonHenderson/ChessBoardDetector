@@ -444,10 +444,6 @@ def processSingleCustomWrapper(filename):
 
 
 def processSingle(filename):
-    current_dir = Path(__file__).resolve().parent
-    parent_dir = current_dir.parent
-    filename = os.path.join(str(parent_dir), filename)
-    print(filename)
     img = loadImage(filename)
     M, ideal_grid, grid_next, grid_good, spts = findChessboard(img)
 
@@ -485,22 +481,10 @@ def processSingle(filename):
     return None, None
 
 def main():
-    test1 = ["Taken_Photos/left,25angle.png",
-            "Taken_Photos/left,random,25angle.png",
-            "Taken_Photos/top,random,rotated.png",
-            "Taken_Photos/top,random.png",
-            "Taken_Photos/top,rotated.png",
-            "Taken_Photos/top.png",
-            "Taken_Photos/left,65angle.png",
-             "Taken_Photos/left,random,45angle.png",
-             "Taken_Photos/left,rotated,45angle.png",
-             "Taken_Photos/left,rotated,random,45angle.png",
-             "Taken_Photos/left,rotated,65angle.png",
-             "Taken_Photos/left,rotated,random,65angle.png"
-            ]
-    current_dir = Path(__file__).resolve().parent
-    parent_dir = current_dir.parent
-    filenames = test1
+    gen_dir = os.path.join('../Generated_photos')
+    files = [f for f in os.listdir(gen_dir) if os.path.isfile(os.path.join(gen_dir, f))]
+    print(files)
+    filenames = files
     print("Files: %s" % filenames)
     fig = figure( figsize=(20, 20))
     n = len(filenames)
@@ -513,7 +497,7 @@ def main():
       row += 1
 
     for i in range(n):
-        filename = os.path.join(str(parent_dir), filenames[i])
+        filename = os.path.join(str(gen_dir), filenames[i])
         print ("Processing %d/%d : %s" % (i+1,n,filename))
 
         img = loadImage(filename)

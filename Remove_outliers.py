@@ -70,7 +70,7 @@ def dp_find_longest_chain(interval, lines, threshold=0.05):
     return chain[::-1]  # reverse to get correct order
 
 
-def remove_outlier_parallel(interval, lines, threshold=0.02):
+def remove_outlier_parallel(interval, lines, threshold=0.1):
     """
     Theta should remain relatively the same, so rho is considered more
     Gap should increase since its going towards the camera
@@ -144,7 +144,7 @@ def remove_outlier_parallel(interval, lines, threshold=0.02):
     return finalize_lines(final_indices, lines)
 
 
-def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
+def brute_force_find(interval, lines, direction, threshold=0.1, deviation=3.5):
     """
     Uses a brute force chaining algorithm in order to find the longest chain of lines that suffices
     the expected behavior given the direction by degree
@@ -157,15 +157,6 @@ def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
     :param deviation:
     :return:
     """
-
-    """
-    45, 225: Decreasing theta overall, so differences are positive
-    Derivative of theta also decreases
-
-    135, 315: Decreasing theta overall, so differences are positive
-    Derivative of theta also decreases
-    """
-    decreasing_theta = {45, 135, 225, 315}
 
     # Curve fit functions
     def arctan_model(x, A, B, C, D):
@@ -188,45 +179,11 @@ def brute_force_find(interval, lines, direction, threshold=0.1, deviation=2.5):
     y = np.array([lines[i][-1] for i in max_chain])
 
     outlier_indices = None
-    """
-    All groups runs a linear fit if the camera is top down perspective
-    90, 270 almost always fits a linear relationship if they didnt snap to decreasing_theta
-    """
     params_linear, _ = curve_fit(linear, x, y)
     y_pred_lin = linear(x, *params_linear)
     resid_lin = np.abs(y - y_pred_lin)
     residuals = resid_lin
     final_param = params_linear
-    if direction in decreasing_theta and len(max_chain) >= 4:
-        """
-        Curve fit an arctan function for persepctive skew cases
-        """
-        # x is just consecutive indices y is theta
-        # p0 is the init guess as param, allows faster converge according to GPT
-        try:
-            params_arctan, _ = curve_fit(arctan_model, x, y, p0=[1.5, 1, 0, np.pi / 2])
-            y_pred_arc = arctan_model(x, *params_arctan)
-
-            # Compute residuals (idea by gpt over CV to determine parallel)
-            resid_arc = np.abs(y - y_pred_arc)
-
-            # Choose the better model based on sum of residuals
-            if np.sum(resid_lin) >= np.sum(resid_arc):
-                residuals = resid_arc
-                final_param = params_arctan
-        except:
-            print("No found arctan params found, default to linear")
-    elif direction == 0 or direction == 180 and len(max_chain) >= 3:
-        """
-        Curve fit an quadratic function for middle vanish point cases
-        Same functionality as above but with quadratic fit
-        """
-        params_quad, _ = curve_fit(quadratic, x, y)
-        y_pred_quad = quadratic(x, *params_quad)
-        resid_quad = np.abs(y - y_pred_quad)
-        if np.sum(resid_lin) >= np.sum(resid_quad):
-            residuals = resid_quad
-            final_param = params_quad
 
     # Now it evaluates the quadratic line of x with the found coefficients
     # We use it to compare to our theta (difference in residuals)

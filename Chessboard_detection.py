@@ -1,6 +1,7 @@
 import sys
 import math
 import cv2
+import os
 import numpy as np
 from collections import Counter
 from ChessBoardDetector import filter_grids as fg
@@ -9,6 +10,7 @@ from ChessBoardDetector import HarrisCornerDetection as hcd
 from ChessBoardDetector import HoughTransform as ht
 from ChessBoardDetector import Grid_Completion as gc
 from ChessBoardDetector import Vanishing_point as vp
+from ChessBoardDetector import Line_Completion as lc
 
 """
 constant = the value is used as is
@@ -106,6 +108,33 @@ def cluster_lines(image, lines, corners, gap_eps, corner=[]):
     :return:
     """
 
+    def overlap_groups(candidate, final_clusters):
+        """
+        If groups having overlapping lines, combine into one group
+        :param candidate: A 2d colleciton of lines and its dir
+        :param found_lines: A set of tuples representing groups of lines
+        :return:
+        """
+        lines, dir = candidate
+        cand_tuple = list([tuple(x) for x in lines])
+        cand_tuple_set = set(cand_tuple)
+        cand_len = len(cand_tuple_set)
+        for i, cluster in enumerate(final_clusters):
+            group, _ = cluster
+            group_tuple_set = set([tuple(x) for x in group])
+            group_len = len(group)
+            # Compare by set intersection
+            intersect_sets = cand_tuple_set.intersection(group)
+            if len(intersect_sets) == min(group_len, cand_len):
+                if cand_len > group_len:
+                    final_clusters.pop(i)
+                    final_clusters.append((cand_tuple, dir))
+                    return
+                return
+        final_clusters.append((cand_tuple, dir))
+        return
+
+
     temp = vp.has_vanishing_point(lines, image.shape[:2])
     # Added a clustering find as well with vp implementation
     clusters = fg.dbscan_cluster_lines(lines, indices=True, eps=0.1)
@@ -132,9 +161,10 @@ def cluster_lines(image, lines, corners, gap_eps, corner=[]):
             continue
 
         # print("after")
+        # print(clean_lines)
         # find_exact_line(image, clean_lines, -1, green=True)
 
-        final_clusters.append((clean_lines, dir))
+        overlap_groups((clean_lines, new_dir), final_clusters)
     return final_clusters
 
 
@@ -264,19 +294,16 @@ def detect_chessboard(image_name, ksize):
 
     corners = hcd.harris(image, ksize, mask)
     # corners = hcd.shi_tomasi(image, ksize, min_gap)
-    binary_map = np.zeros((height, width), dtype=np.uint8)
 
-    for x, y in corners:
-        x = int(x)
-        y = int(y)
-        if (width - 1) > x > 0 and (height - 1) > y > 0:
-            binary_map[y, x] = 255
-
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (ksize+2, ksize+2), 1)
+    # edge by GPT
+    edges = cv2.Canny(blurred, threshold1=50, threshold2=150, apertureSize=3)
     lines, line_by_pts = houghLine_detect([height, width],
-                                                    binary_map,
+                                                    edges,
                                                     corners,
                                                     mask,
-                                                    3)
+                                                    100)
     find_exact_line(image, lines, 0, corners=corners, green=False)
 
     # lines = sorted(lines, key=lambda x: x[1])
@@ -301,6 +328,13 @@ def detect_chessboard(image_name, ksize):
         g1_lines, g1_dir = g1_data
         g2_lines, g2_dir = g2_data
 
+        g1_lines_pts, g2_lines_pts = lc.get_outer_points(g1_lines, g2_lines, (height,width))
+
+        for x in g1_lines_pts:
+            print(x)
+        print("g2")
+        for x in g2_lines_pts:
+            print(x)
         print("score", scores[max_index])
         find_exact_line(image, g1_lines + g2_lines, 0, green=False)
 
@@ -309,14 +343,14 @@ def detect_chessboard(image_name, ksize):
         line_pts = the intersection between lines and corner points
         corners = all corner points found by a corner detection function
         """
-        gc.point_interpolate(g1_lines,
-                             g2_lines,
-                             sect_list[max_index],
-                             line_by_pts,
-                             corners,
-                             image.shape[:2],
-                             image=image,
-                             lines=lines)
+        # gc.point_interpolate(g1_lines,
+        #                      g2_lines,
+        #                      sect_list[max_index],
+        #                      line_by_pts,
+        #                      corners,
+        #                      image.shape[:2],
+        #                      image=image,
+        #                      lines=lines)
     else:
         print("No valid grid found")
         print("Failed check_all_grids")
@@ -348,29 +382,21 @@ def main():
             "Real_Photos/Mid,somewhat_angled,flat2.jpg",
             "Real_Photos/Mid,very_angled,solid.jpg"
             ]
-
-    test1 = ["Taken_Photos/left,25angle.png",
-            "Taken_Photos/left,random,25angle.png",
-            "Taken_Photos/top,random,rotated.png",
-            "Taken_Photos/top,random.png",
-            "Taken_Photos/top,rotated.png",
-            "Taken_Photos/top.png",
-            "Taken_Photos/left,65angle.png",
-             "Taken_Photos/left,random,45angle.png",
-             "Taken_Photos/left,rotated,45angle.png",
-             "Taken_Photos/left,rotated,random,45angle.png",
-             "Taken_Photos/left,rotated,65angle.png",
-             "Taken_Photos/left,rotated,random,65angle.png"
-            ]
-
+    taken = "./Taken_Photos"
+    generated = "./Generated_photos"
+    taken_files = [f for f in os.listdir(taken) if os.path.isfile(os.path.join(taken, f))]
+    gen_files = [f for f in os.listdir(generated) if os.path.isfile(os.path.join(generated, f))]
     # for j in range(len(easy)):
     #     detected = detect_chessboard(easy[j], thres_config, scalar_config, i)
     #     print('done: ', i)
     # for j in range(len(medium)):
     #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
     #     print('done: ', i)
-    for j in range(len(test1)):
-        detect_chessboard(test1[j], ksize)
+    # for j in range(2, len(taken_files)):
+    #     detect_chessboard(os.path.join(taken, taken_files[j]), ksize)
+
+    for j in range(len(hard)):
+        detect_chessboard(hard[j], ksize)
 
 
 if __name__ == "__main__":

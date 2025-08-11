@@ -174,17 +174,13 @@ def finalize_groups(group_dict, lines):
     :return: A list of tuples (lines, direction), maybe add average gap but not sure
     """
 
-    def check_similarity(g1, g2, dir1, dir2):
+    def check_similarity(g1, g2):
         """
         Checks two groups for intersecting values (intersection of lists)
         :param g1: Group 1 of lines (1d collection of elements, prefer int)
         :param g2: Group 2 of lines
-        :param dir1: Direction of VP for g1 (int)
-        :param dir2: Direction of VP for g2 (int)
         :return: True, False to combine the groups
         """
-        if dir1 != dir2:
-            return False
         intersection = np.intersect1d(np.array(g1), np.array(g2))
         # True if (one group is completely in another) or
         # The groups overlap over 1/2 of elements
@@ -205,9 +201,13 @@ def finalize_groups(group_dict, lines):
         while j < len(unique_values):
             g2, dir2 = unique_values[j]
             # Combines and removes the i+1 index element without incrementing i
-            if check_similarity(g1, g2, dir1, dir2):
+            if check_similarity(g1, g2):
                 combined = g1 + g2
-                unique_values[i] = (tuple(set(combined)), dir1)
+                if len(g1) >= len(g2):
+                    dom_dir = dir1
+                else:
+                    dom_dir = dir2
+                unique_values[i] = (tuple(set(combined)), dom_dir)
                 # Update the old group
                 g1, dir1 = unique_values[i]
                 unique_values.pop(j)
@@ -294,7 +294,7 @@ def has_vanishing_point(lines, image_shape):
                 continue
             if sect is None:
                 # Add to VP given direction
-                good_vps_index.setdefault(direction, {j}).add(j)
+                good_vps_index.setdefault(direction, set()).add(j)
         # Add own line to all groups
         for key in good_vps_index:
             good_vps_index[key].add(i)
@@ -303,7 +303,7 @@ def has_vanishing_point(lines, image_shape):
         for key, value in good_vps_index.items():
             if len(value) >= min_needed:
                 line_group = frozenset(value)
-                good_lines.setdefault(i, set([(line_group, key)])).add((line_group, key))
+                good_lines.setdefault(i, set()).add((line_group, key))
             if escape:
                 break
 
@@ -320,6 +320,6 @@ def has_vanishing_point(lines, image_shape):
             theta_to_dir = [fg.snap_to_cardinal_diagonal(np.rad2deg(lines[x][1])) for x in results]
             dir_counter = Counter(theta_to_dir)
             most_common_dir, _ = dir_counter.most_common(1)[0]
-            good_lines.setdefault(i, set([(line_group, most_common_dir)])).add((line_group, most_common_dir))
+            good_lines.setdefault(i, set()).add((line_group, most_common_dir))
 
     return finalize_groups(good_lines, lines)

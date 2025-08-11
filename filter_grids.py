@@ -299,10 +299,10 @@ def check_grid_like(g1, g2, image_shape, corners=[]):
     works best with top down view, and strict corner view
 
     Weight cases:
-    Evenly spaced intersections = 30/100
+    Evenly spaced intersections = 20/100
     High ratio of intersections being corners = 30/100
     Evenly spaced rho difference = 20/100
-    Amount of lines = 20/100
+    Amount of lines = 30/100
 
 
     :param g1: Cluster of lines represented as an unpacked 2D list
@@ -311,8 +311,8 @@ def check_grid_like(g1, g2, image_shape, corners=[]):
     """
     if len(g1) == 0 or len(g2) == 0:
         return
-    group1 = g1.copy()
-    group2 = g2.copy()
+    group1 = list(g1)
+    group2 = list(g2)
     group1.sort(key=lambda x: x[0])
     group2.sort(key=lambda x: x[0])
 
@@ -401,8 +401,8 @@ def check_grid_like(g1, g2, image_shape, corners=[]):
     # Final confidencce score to classify grid by lines
     score = 0
     max_cv = 0.20
-    intersect_points = 30
-    line_points = 20
+    intersect_points = 20
+    line_points = 30
 
     """
     Variance scoring
@@ -412,7 +412,7 @@ def check_grid_like(g1, g2, image_shape, corners=[]):
     [0.1, 0.2]      Acceptable CV
     [0.2, inf)      No points
     """
-    # Score for: Evenly spaced intersections = 30/100
+    # Score for: Evenly spaced intersections = 20/100
     intersect_mean = 1
     if all_intersects_mean[1] > 0 and all_intersects_mean[0] > 0:
         intersect_mean = all_intersects_mean[0] / all_intersects_mean[1]
@@ -453,7 +453,7 @@ def check_grid_like(g1, g2, image_shape, corners=[]):
     # else:
     #     score = 0
 
-    # Score for: Amount of lines = 20/100
+    # Score for: Amount of lines = 30/100
     # amount of lines [8,27] gets half by default, additional through parabolic scaling
     if total_lines > 7 and total_lines < 28:
         norm_amt = (total_lines - 18) / (18 - 8)
