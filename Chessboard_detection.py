@@ -327,21 +327,56 @@ def detect_chessboard(image_name, ksize):
         g1_data, g2_data = final_lines[max_index]
         g1_lines, g1_dir = g1_data
         g2_lines, g2_dir = g2_data
-        find_exact_line(image, g1_lines + g2_lines, 0, green=False)
+
+        """
+        Build scoring system of points (only for line complete)
+        """
+        # verified, verified_lines = gc.intersect_verification(sect_list[max_index], corners)
+        # flat_verified = [pt for row in verified for pt in row]
+        # all_sects, line_corners = gc.get_points(sect_list[max_index], line_by_pts)
+        # score_system, all_pt_tree, all_pts = gc.score_points(flat_verified, all_sects, line_corners, corners)
+
+        """
+        Line complete method (not enough time to finish + debug)
+        """
+        # g1_pts, g2_pts = lc.get_outer_points(sect_list[max_index])
+        # print("g line points")
+        # print(g1_pts)
+        # print(g2_pts)
+        # g1_pt1_list, g1_pt2_list = lc.insert_lines(g1_pts)
+        # g2_pt1_list, g2_pt2_list = lc.insert_lines(g2_pts)
+        # print("insert if needed", g1_pt1_list)
+        # print(g1_pt2_list)
+        # g1_pt1_inserts, g1_pt2_inserts, g1_need = lc.mask_lines(g1_pt1_list, g1_pt2_list)
+        # g2_pt1_inserts, g2_pt2_inserts, g2_need = lc.mask_lines(g2_pt1_list, g2_pt2_list)
+        # print("expand mask", g1_pt1_inserts, g1_pt2_inserts)
+        # print(g2_pt1_inserts, g2_pt2_inserts)
+        # left_1, left_2 = g1_pt1_inserts
+        # right_1, right_2 = g1_pt2_inserts
+        # g1_top_k = lc.get_best_k_lines(left_1, left_2, right_1, right_2, all_pts, score_system, g1_need)
+        #
+        # left_1, left_2 = g2_pt1_inserts
+        # right_1, right_2 = g2_pt2_inserts
+        # g2_top_k = lc.get_best_k_lines(left_1, left_2, right_1, right_2, all_pts, score_system, g2_need)
+        # print("top_k", g1_top_k)
+        # print(g2_top_k)
+        # lc.show_lines(g1_top_k + g1_pts, image)
+        # lc.show_lines(g2_top_k + g2_pts, image)
 
         """
         sect_list = the intersection between the two groups represented as points
         line_pts = the intersection between lines and corner points
         corners = all corner points found by a corner detection function
         """
-        gc.point_interpolate(g1_lines,
-                             g2_lines,
-                             sect_list[max_index],
-                             line_by_pts,
-                             corners,
-                             image.shape[:2],
-                             image=image,
-                             lines=lines)
+        return gc.point_interpolate(g1_lines,
+                                     g2_lines,
+                                     sect_list[max_index],
+                                     line_by_pts,
+                                     corners,
+                                     image.shape[:2],
+                                     image=image,
+                                     lines=lines)
+
     else:
         print("No valid grid found")
         print("Failed check_all_grids")
@@ -383,11 +418,11 @@ def main():
     # for j in range(len(medium)):
     #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
     #     print('done: ', i)
-    for j in range(len(taken_files)):
-        detect_chessboard(os.path.join(taken, taken_files[j]), ksize)
+    # for j in range(8, len(taken_files)):
+    #     detect_chessboard(os.path.join(taken, taken_files[j]), ksize)
 
-    # for j in range(len(medium)):
-    #     detect_chessboard(medium[j], ksize)
+    for j in range(len(medium)):
+        detect_chessboard(medium[j], ksize)
 
 
 if __name__ == "__main__":

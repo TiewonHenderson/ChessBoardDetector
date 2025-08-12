@@ -188,7 +188,7 @@ def point_masking(points, min_gap, tolerance=5, needed_score=3):
     return None
 
 
-def filter_hough_lines_by_corners(lines, corners, min_gap, tolerance=5, min_hits=3):
+def filter_hough_lines_by_corners(lines, corners, min_gap, tolerance=2, min_hits=3):
     """
     :param lines:
     :param corners:
@@ -202,7 +202,7 @@ def filter_hough_lines_by_corners(lines, corners, min_gap, tolerance=5, min_hits
     for l in lines:
         hits = set()
         for point in corners:
-            if hough_line_intersect(l, point):
+            if hough_line_intersect(l, point, tolerance):
                 hits.add(tuple(point))
         # Rest of intersected points are appended to 2nd list
         if len(hits) >= min_hits:

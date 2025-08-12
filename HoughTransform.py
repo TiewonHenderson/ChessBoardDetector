@@ -110,6 +110,27 @@ def get_line(rho, theta):
     return [(x1, y1), (x2, y2)]
 
 
+def points_to_rho_theta(p1, p2):
+    """
+    GPT generated
+    :param p1:
+    :param p2:
+    :return:
+    """
+    x1, y1 = p1
+    x2, y2 = p2
+
+    dx, dy = x2 - x1, y2 - y1
+    theta = np.arctan2(dy, dx) + np.pi / 2  # normal vector angle
+    # Normalize theta to [0, pi)
+    if theta < 0:
+        theta += np.pi
+    elif theta >= np.pi:
+        theta -= np.pi
+    rho = x1 * np.cos(theta) + y1 * np.sin(theta)
+    return rho, theta
+
+
 def polar_theta(point):
     """
     Get the polar coordinate theta value from two lines

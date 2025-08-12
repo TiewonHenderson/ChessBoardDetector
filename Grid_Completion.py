@@ -314,7 +314,7 @@ def fill_in_missing(row, points_tree, all_points, score_system, dist_eps=0.1):
         # Default score of 28 since it includes the two verified end points
         mask_score = 28
         for pts in mask:
-            neighbor_indices, neighbor_dists = top_k_neighbors(pts, points_tree)
+            neighbor_indices, neighbor_dists = top_k_neighbors(tuple(pts), points_tree)
             """
             distance scoring formula 
             """
@@ -365,9 +365,9 @@ def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts,
         # Loop from good index to 0, allows for error adapting
         # Expected inclusive indices = [0,8]
         for i in range(indices[0], indices[1], range_op):
-            if out_of_bounds(row[i]):
+            if out_of_bounds(row[i], bounds):
                 return -1, []
-            neighbor_indices, neighbor_dists = top_k_neighbors(row[i], points_tree)
+            neighbor_indices, neighbor_dists = top_k_neighbors(tuple(row[i]), points_tree)
             best_points = (1, row[i])
             for i, dist in enumerate(neighbor_dists):
                 point = all_pts[neighbor_indices[i]]
@@ -383,7 +383,7 @@ def choose_best_row_mask(row, true_index, score_system, points_tree, all_pts,
                 if score > best_points[0]:
                     best_points = (score, point)
             total_score += best_points[0]
-            finalize_row.append(tuple(best_points[1]))
+            finalize_row.append(best_points[1])
         finalize_row = finalize_row[::-1]
         return total_score, finalize_row
 
@@ -453,12 +453,10 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
 
     row_len = len(row)
     # Cannot use same points to represent multiple (cause of duplication)
-    if row == None or row_len <= 1:
+    if row == None or row_len <= 1 or row_len == 9:
         # Row too short
         return row
-    if row_len == 9:
-        return row
-    if 2 <= row_len <= 4:
+    if row_len < 9:
         """
         Two approaches:
         1) Generate masking over pairs of points until suffices
@@ -482,38 +480,6 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
             if score_tuple[0] > max_score[0]:
                 max_score = score_tuple
         return max_score[1]
-    elif row_len < 9:
-        """
-        Approach:
-        Fill inbetween points, likely chance we have the border points
-        get the min, median, max gap to interpolate if needed
-        points expected: 5-8
-        """
-        _, new_row = fill_in_missing(row, points_tree, all_pts, score_system)
-        if len(new_row) == 9:
-            return new_row
-        elif len(new_row) > 9:
-            while len(new_row) > 9:
-                new_row.pop(len(new_row) // 2)
-            return new_row
-        outer_pt_1 = np.array(new_row[0])
-        outer_pt_2 = np.array(new_row[-1])
-        all_dist = np.diff(new_row, axis=0)
-        num_steps = abs(9 - len(new_row))
-        steps = np.arange(1, num_steps + 1)[:, None]  # shape (num_steps, 1)
-        best_mask = (-1, None)
-        for dist in all_dist:
-            new_prev = outer_pt_1 - dist * steps
-            new_next = outer_pt_2 + dist * steps
-            row_np = np.array(new_row)
-            cand_mask = np.vstack([new_prev[::-1], row_np, new_next])
-            cand_mask = filter_in_bounds(cand_mask)
-            if len(cand_mask) < 9:
-                continue
-            mask_score = scoring_window(list(map(tuple, cand_mask.astype(int))), points_tree, all_pts, score_system)
-            if mask_score[0] > best_mask[0]:
-                best_mask = mask_score
-        return best_mask[1]
     else:
         """
         Any bigger row is just another version of sliding window, except a few of them
@@ -528,6 +494,26 @@ def get_row_mask(row, points_tree, all_pts, score_system, dim=1000, steps=None):
         while len(row) > 9:
             row.pop(len(row)//2)
         return row
+
+
+def full_row_step_diff(row_1, row_2, dir="right"):
+    """
+    Adds the difference between the previous row in order to interpolate a next row (simple method)
+    Then snap the point to a known corner in score_system
+    :param row_1: must be before row 2 in some order given (2d list of points)
+    :param row_2: (2d list of points)
+    :param dir: Direction of cloning the row towards by index
+    :return:
+    """
+    row_a = np.array(row_1)
+    row_b = np.array(row_2)
+    if dir == "right":
+        diff = row_b - row_a
+        new_row = row_b + diff
+    else:
+        diff = row_a - row_b
+        new_row = row_a + diff
+    return new_row.tolist()
 
 
 def mask_9x9(verified, points_tree, all_pts, score_system, dim=1000):
@@ -560,17 +546,34 @@ def mask_9x9(verified, points_tree, all_pts, score_system, dim=1000):
         mask = verified.copy()
     row_result = []
     for row in mask:
+        row = sort_points_by_range(row)
         row_result.append(sort_points_by_range(get_row_mask(row, points_tree, all_pts, score_system)))
 
-    transposed = [sort_points_by_range(list(col)) for col in zip(*row_result)]
-    flat_grid = [pt for row in transposed for pt in row]
-    show_points([],[],flat_grid)
+    if len(row_result) < 3:
+        # Too little rows to be worth interpolating
+        return []
 
-    final_grid = []
-    for col in transposed:
-        final_grid.append(get_row_mask(col, points_tree, all_pts, score_system))
-
-    return final_grid
+    # Instead of transpose, we realign and expand by row instead
+    while len(row_result) < 9:
+        left = full_row_step_diff(row_result[0], row_result[1], "left")
+        right = full_row_step_diff(row_result[-2], row_result[-1], "right")
+        left_score, left = choose_best_row_mask(left, len(left)//2, score_system, points_tree, all_pts)
+        right_score, right = choose_best_row_mask(right, len(right) // 2, score_system, points_tree, all_pts)
+        left_valid = len(left) == 9
+        right_valid = len(right) == 9
+        if left_valid and right_valid:
+            # Check score after all len of row suffices
+            if right_score > left_score:
+                row_result.append(right)
+            else:
+                row_result.insert(0, left)
+        elif left_valid and not right_valid:
+            row_result.insert(0, left)
+        elif right_valid and not left_valid:
+            row_result.append(right)
+        else:
+            break
+    return row_result
 
 
 def point_interpolate(group1, group2,
@@ -587,7 +590,7 @@ def point_interpolate(group1, group2,
     :param threshold:
     :param image: OPTIONAL for display
     :param lines: OPTIONAL for display
-    :return:
+    :return: Return the four corners that fits best from RANSAC
     """
     if group1 is None or group2 is None or len(group1) < 2 or len(group2) < 2:
         return None, None
@@ -616,10 +619,6 @@ def point_interpolate(group1, group2,
     missing_amt = abs(len(flat_verified) - dimension**2)
 
     score_system, all_pt_tree, all_pts = score_points(flat_verified, all_sects, line_corners, corners)
-    show_points(flat_verified, all_sects, line_corners, corners, height=height, width=width)
-
-    for row in verified:
-        print(row)
 
     """
     Old grid interpolation by rows of points
@@ -629,11 +628,18 @@ def point_interpolate(group1, group2,
     if len(flat_grid) != 81:
         print("Failed points")
         return None
-    show_points([], flat_grid, height=height, width=width)
 
-
-    h_grid = ransac_grids(final_grid, height)
-    show_points([], flat_grid, h_grid, image=image, thickness=2)
+    h_grid, grid_by_row = ransac_grids(final_grid, height)
+    f_grid = [sort_points_by_range(row) for row in grid_by_row]
+    best_score = (0, [])
+    for i in range(-1, 2, 1):
+        for j in range(-1, 2, 1):
+            moved_grid = offset_grid_simple_robust(f_grid, i, j)
+            four_corners = [moved_grid[0][0], moved_grid[0][-1], moved_grid[-1][-1], moved_grid[-1][0]]
+            score = all_pts_in_corners(all_pts, score_system, four_corners)
+            if score > best_score[0]:
+                best_score = (score, four_corners)
+    return best_score[1]
 
 
 def ransac_grids(grid_mask, dim=1000, threshold=5):
@@ -667,8 +673,68 @@ def ransac_grids(grid_mask, dim=1000, threshold=5):
 
     full_grid_projected = cv2.perspectiveTransform(dst_grid.reshape(-1, 1, 2), H)
     full_grid_projected = full_grid_projected.reshape(-1, 2)
-    full_grid_tuples = [tuple(map(int, pt)) for pt in full_grid_projected]
-    return full_grid_tuples
+    full_grid_3d = full_grid_projected.reshape(9, 9, 2)
+    full_grid_3d = full_grid_3d.astype(int)
+    full_grid = [list(map(int, pt)) for pt in full_grid_projected]
+    return full_grid, full_grid_3d
+
+
+def offset_grid_simple_robust(grid_points_3d, offset_x_squares=0, offset_y_squares=0):
+    """
+    Claude generated
+    Uses offset of the extreme four corners to move the whole grid
+    """
+    grid_3d = np.array(grid_points_3d)
+    all_points = grid_3d.reshape(-1, 2)
+
+    # Find the span in each direction
+    x_min, x_max = np.min(all_points[:, 0]), np.max(all_points[:, 0])
+    y_min, y_max = np.min(all_points[:, 1]), np.max(all_points[:, 1])
+
+    # Calculate spacing (total span divided by 8 squares)
+    x_spacing_per_square = (x_max - x_min) / 8
+    y_spacing_per_square = (y_max - y_min) / 8
+
+    offset_vector = np.array([
+        offset_x_squares * x_spacing_per_square,
+        offset_y_squares * y_spacing_per_square
+    ])
+
+    offset_grid_3d = grid_3d + offset_vector
+
+    return offset_grid_3d.astype(int)
+
+
+def all_pts_in_corners(all_pts, score_system, four_corner):
+    """
+    GPT generated
+    Used to see all the points within the border, its then totals the score
+    :param all_pts:
+    :param score_system:
+    :param four_corner:
+    :return:
+    """
+    # points: list of [x, y]
+    points = np.array(all_pts)  # shape (N, 2)
+
+    # your 4 boundary points
+    boundary = np.array(four_corner)  # shape (4, 2)
+
+    min_x, max_x = boundary[:, 0].min(), boundary[:, 0].max()
+    min_y, max_y = boundary[:, 1].min(), boundary[:, 1].max()
+
+    inside_mask = (
+            (points[:, 0] >= min_x) &
+            (points[:, 0] <= max_x) &
+            (points[:, 1] >= min_y) &
+            (points[:, 1] <= max_y)
+    )
+
+    inside_points = points[inside_mask]
+    total_score = 0
+    for in_pts in inside_points:
+        total_score += score_system[tuple(in_pts)]
+    return total_score
 
 
 def show_points(points, points_2=[], points_3=[], points_4=[],
