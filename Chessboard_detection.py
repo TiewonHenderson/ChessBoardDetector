@@ -51,8 +51,8 @@ def image_load(image_name):
         old_image = image.copy()
         image = cv2.resize(image, (needed_dim, needed_dim))
 
-        scale_factor_x = needed_dim / old_image.shape[1]
-        scale_factor_y = needed_dim / old_image.shape[0]
+        scale_factor_x = old_image.shape[1] / needed_dim
+        scale_factor_y = old_image.shape[0] / needed_dim
 
     return image, old_image, (scale_factor_x, scale_factor_y)
 
@@ -304,7 +304,6 @@ def detect_chessboard(image_name, ksize):
                                                     corners,
                                                     mask,
                                                     threshold=max(height, width)//10)
-    find_exact_line(image, lines, 0, corners=corners, green=False)
 
     # lines = sorted(lines, key=lambda x: x[1])
     # for i in range(len(lines)):
@@ -368,15 +367,21 @@ def detect_chessboard(image_name, ksize):
         line_pts = the intersection between lines and corner points
         corners = all corner points found by a corner detection function
         """
-        return gc.point_interpolate(g1_lines,
-                                     g2_lines,
-                                     sect_list[max_index],
-                                     line_by_pts,
-                                     corners,
-                                     image.shape[:2],
-                                     image=image,
-                                     lines=lines)
-
+        true_corners = gc.point_interpolate(g1_lines,
+                                        g2_lines,
+                                        sect_list[max_index],
+                                        line_by_pts,
+                                        corners,
+                                        image.shape[:2],
+                                        image=image,
+                                        lines=lines)
+        if true_corners is None:
+            return None
+        scaled_corners = []
+        for pt in true_corners:
+            x, y = pt
+            scaled_corners.append((x * image_scale[0], y * image_scale[1]))
+        return scaled_corners
     else:
         print("No valid grid found")
         print("Failed check_all_grids")

@@ -593,14 +593,14 @@ def point_interpolate(group1, group2,
     :return: Return the four corners that fits best from RANSAC
     """
     if group1 is None or group2 is None or len(group1) < 2 or len(group2) < 2:
-        return None, None
+        return None
     height, width = image_shape
     corners = list(map(tuple, corners))
     verified, verified_lines = intersect_verification(sect_list, corners)
     all_sects, line_corners = get_points(sect_list, line_pts)
     flat_verified = [pt for row in verified for pt in row]
     if len(flat_verified) <= 9:
-        return None, None
+        return None
     g1 = []
     g2 = []
     """
