@@ -20,6 +20,10 @@ To run the algorithm:
 1) A 4 element list that includes the 4 corner points found
 2) None if no points could be found
 
+### Found grid example (with Sam's algorithm in comparison):
+
+<img width="1660" height="1080" alt="top,random,rotated" src="https://github.com/user-attachments/assets/eddf73b0-99a7-47a4-9b34-c856d3119d40" />
+
 ---
 
 ###### Sam-o-bot's chessboard detection repository:
