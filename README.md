@@ -15,8 +15,5 @@
 
 ---
 
-#### Current score vs Sam-o-bot x-corner expansion method
-<img width="1400" height="600" alt="scores_histogram" src="https://github.com/user-attachments/assets/cd202b85-b9fb-4a22-831b-075793ee8356" />
-
 ###### Sam-o-bot's chessboard detection repository:
 [https://github.com/Elucidation/ChessboardDetect](https://github.com/Elucidation/ChessboardDetect?tab=readme-ov-file#chessboard-detection)
