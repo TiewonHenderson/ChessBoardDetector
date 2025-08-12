@@ -22,7 +22,7 @@ To run the algorithm:
 
 ### Found grid example (with Sam's algorithm in comparison):
 
-<img width="1660" height="1080" alt="top,random,rotated" src="https://github.com/user-attachments/assets/eddf73b0-99a7-47a4-9b34-c856d3119d40" />
+<img width="1030" height="1080" alt="top" src="https://github.com/user-attachments/assets/6439f641-a393-4562-99b3-d192eaa96d9b" />
 
 ---
 
