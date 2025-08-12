@@ -22,9 +22,9 @@ To run the algorithm:
 
 ### Found grid example (with Sam's algorithm in comparison):
 
-Green mask + line = Ground Truth
-Blue line = Sam's results
-Yellow line = Our results
+- Green mask + line = Ground Truth
+- Blue line = Sam's results
+- Yellow line = Our results
 
 <img width="1030" height="802" alt="top" src="https://github.com/user-attachments/assets/9f17d49d-a9f0-4fc0-a329-c7e942623e41" />
 
