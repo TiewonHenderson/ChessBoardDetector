@@ -59,7 +59,7 @@ def shi_tomasi(image, ksize, min_gap, points=200):
     return xy_points
 
 # GPT generated
-def harris(image, ksize, mask):
+def harris(image, ksize, mask=None):
     """
     harris corner detection
     Inital function to return cartesian points representing corners
@@ -88,7 +88,8 @@ def harris(image, ksize, mask):
 
     # Combine masks: points that are local maxima AND above threshold
     corner_mask = np.logical_and(local_max_mask, threshold_mask)
-    corner_mask = np.logical_and(corner_mask, mask)
+    if corner_mask is not None:
+        corner_mask = np.logical_and(corner_mask, mask)
 
     # Get coordinates of final corners
     corner_points = np.argwhere(corner_mask)

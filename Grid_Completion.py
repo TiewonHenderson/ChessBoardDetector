@@ -531,6 +531,19 @@ def mask_9x9(verified, points_tree, all_pts, score_system, dim=1000):
     :return:
     """
 
+    def rank_row(row, score_system=score_system):
+        """
+        Given a row of points, rank them by how related to the corners points they are.
+        We do this because there is a possiblity more then 9 row was created.
+        :param row:
+        :param point_system:
+        :return:
+        """
+        total_score = 0
+        for pts in row:
+            total_score += score_system[tuple(pts)]
+        return total_score
+
     mask = []
     # If theres two many rows then needed, remove some rows that score relatively low
     if len(verified) > 9:
@@ -552,6 +565,7 @@ def mask_9x9(verified, points_tree, all_pts, score_system, dim=1000):
     if len(row_result) < 3:
         # Too little rows to be worth interpolating
         return []
+
 
     # Instead of transpose, we realign and expand by row instead
     while len(row_result) < 9:
@@ -599,6 +613,7 @@ def point_interpolate(group1, group2,
     verified, verified_lines = intersect_verification(sect_list, corners)
     all_sects, line_corners = get_points(sect_list, line_pts)
     flat_verified = [pt for row in verified for pt in row]
+    # show_points(flat_verified, all_sects, line_corners, corners, height=height, width=width)
     if len(flat_verified) <= 9:
         return None
     g1 = []
@@ -733,7 +748,8 @@ def all_pts_in_corners(all_pts, score_system, four_corner):
     inside_points = points[inside_mask]
     total_score = 0
     for in_pts in inside_points:
-        total_score += score_system[tuple(in_pts)]
+        if tuple(in_pts) in score_system:
+            total_score += score_system[tuple(in_pts)]
     return total_score
 
 
@@ -767,7 +783,7 @@ def show_points(points, points_2=[], points_3=[], points_4=[],
 
     # Draw each point as a small white circle (colors from GPT)
     for x, y in points:
-        cv2.circle(use_image, (int(x), int(y)), radius=2, color=(255, 255, 255), thickness=-1)
+        cv2.circle(use_image, (int(x), int(y)), radius=2, color=(255, 255, 255), thickness=3)
     # Green for first `points_2`
     for x, y in points_2:
         cv2.circle(use_image, (int(x), int(y)), radius=5, color=(0, 255, 0), thickness=thickness)

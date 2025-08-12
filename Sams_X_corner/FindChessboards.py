@@ -414,6 +414,7 @@ def getBoardOutline(best_lines_x, best_lines_y, M):
     xy_unwarp = cv2.perspectiveTransform(xy, M)
     return xy_unwarp[0,:,:]
 
+
 def processSingleCustomWrapper(filename):
     print(filename)
     img = loadImage(filename)

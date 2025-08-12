@@ -44,10 +44,6 @@ def image_load(image_name):
     height, width, _ = image.shape
     needed_dim = 1000
     if height != needed_dim or width != needed_dim:
-        # Calculate scaling factor, to maintain aspect ratio
-        width_fac = needed_dim / width
-        height_fac = needed_dim / height
-
         old_image = image.copy()
         image = cv2.resize(image, (needed_dim, needed_dim))
 
@@ -260,11 +256,11 @@ def find_exact_line(image, lines, index, corners=[], green=True):
     ht.show_images(img)
 
 
-def detect_chessboard(image_name, ksize):
+def detect_chessboard(image_name, ksize=ksize):
     """
     :param image_name:
-    :param thres_config:
-    :return: An image with
+    :param ksize:
+    :return: 4 corners or
     """
 
     image, origin_img, image_scale = image_load(image_name)
@@ -302,7 +298,6 @@ def detect_chessboard(image_name, ksize):
     lines, line_by_pts = houghLine_detect([height, width],
                                                     edges,
                                                     corners,
-                                                    mask,
                                                     threshold=max(height, width)//10)
 
     # lines = sorted(lines, key=lambda x: x[1])
@@ -327,6 +322,7 @@ def detect_chessboard(image_name, ksize):
         g1_lines, g1_dir = g1_data
         g2_lines, g2_dir = g2_data
 
+        # find_exact_line(image, g1_lines + g2_lines, 0, corners=corners, green=False)
         """
         Build scoring system of points (only for line complete)
         """
@@ -385,6 +381,7 @@ def detect_chessboard(image_name, ksize):
     else:
         print("No valid grid found")
         print("Failed check_all_grids")
+        return None
 
 
 def main():
@@ -402,7 +399,6 @@ def main():
               "Taken_Photos/left,rotated,45angle.png",
               "Taken_Photos/left,rotated,random,45angle.png",
               "Real_Photos/Mid,not_angled,flat.jpeg",
-              "Real_Photos/Mid,not_angled,flat2.jpg",
               "Real_Photos/Mid,somewhat_angled,flat.png"
               ]
     hard = ["Taken_Photos/left,rotated,65angle.png",
@@ -417,13 +413,7 @@ def main():
     generated = "./Generated_photos"
     taken_files = [f for f in os.listdir(taken) if os.path.isfile(os.path.join(taken, f))]
     gen_files = [f for f in os.listdir(generated) if os.path.isfile(os.path.join(generated, f))]
-    # for j in range(len(easy)):
-    #     detected = detect_chessboard(easy[j], thres_config, scalar_config, i)
-    #     print('done: ', i)
-    # for j in range(len(medium)):
-    #     detected = detect_chessboard(medium[j], thres_config, scalar_config, i)
-    #     print('done: ', i)
-    # for j in range(8, len(taken_files)):
+    # for j in range(len(taken)):
     #     detect_chessboard(os.path.join(taken, taken_files[j]), ksize)
 
     for j in range(len(medium)):
