@@ -5,11 +5,38 @@ from math import sin,cos,ceil,sqrt
 from scipy.spatial import ConvexHull
 from scipy.spatial import KDTree
 from sklearn.linear_model import RANSACRegressor
-from ChessBoardDetector import HarrisCornerDetection as hcd
+from ChessBoardDetector.Line_Point_detection import HarrisCornerDetection as hcd
+from ChessBoardDetector.Line_Point_detection import HoughTransform as ht
 from ChessBoardDetector import Chessboard_detection as cd
-from ChessBoardDetector import HoughTransform as ht
-from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import cv_filter_groups as cvfg
+from ChessBoardDetector.Clustering import filter_grids as fg
+from ChessBoardDetector.Remove_outliers import cv_filter_groups as cvfg
+
+"""
+Uses the concept of point interpolation by first:
+verifiying the intersections of the found grid lines with the corners found.
+Intersections are kept, but we only expand on the verified corners.
+
+Ideally we would want to expand outwards in all directions, all at once.
+OR
+Expand row wise, but applied to all rows at once, whichever direction (left/right for explaination sake)
+scores better, keep that entire column.
+
+Once we have Nx9 points, we replicate the outer rows and expand outwards by row (up/down for explaination sake)
+In order to get 9x9 points
+
+In extremely rare cases where MxN and either M or N > 9, we would end up removing rows/cols
+that scores the least based of the corners they represent.
+
+We run cv homography RANSAC in order to get the final homography mask over the points, and shift
+the four outer most corners around 1 "square" in order to see which includes the most
+significant corners within the square boundaries.
+
+Corners are scored:
+corner = 2 points
+corner thats part of a line = 6 points
+intersection = 8 points
+corner + intersection = 14 points
+"""
 
 
 def closest_corner(corners, line):

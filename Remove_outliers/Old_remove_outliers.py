@@ -2,8 +2,8 @@ import sys
 import cv2
 import numpy as np
 from scipy.optimize import curve_fit
-from ChessBoardDetector import HoughTransform as ht
-from ChessBoardDetector import cv_filter_groups as cvfg
+from ChessBoardDetector.Line_Point_detection import HoughTransform as ht
+from ChessBoardDetector.Remove_outliers import cv_filter_groups as cvfg
 """
 DEPRECATED OUTLIER REMOVAL ALGORITHM
 

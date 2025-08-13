@@ -2,12 +2,19 @@ import sys
 import math
 import cv2
 import numpy as np
-from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import HarrisCornerDetection as hcd
-from ChessBoardDetector import cv_filter_groups as cvfg
 from sklearn.cluster import DBSCAN
 from scipy.optimize import curve_fit
 from collections import Counter
+from ChessBoardDetector.Clustering import filter_grids as fg
+from ChessBoardDetector.Line_Point_detection import HarrisCornerDetection as hcd
+from ChessBoardDetector.Remove_outliers import cv_filter_groups as cvfg
+
+"""
+Description:
+This file doesn't actually run Houghline transformation, it list helper functions involving
+polar coordinate lines. For example this file includes functions that can extract the houghline result
+get points from houghline value.
+"""
 
 
 def flatten_lines(lines):

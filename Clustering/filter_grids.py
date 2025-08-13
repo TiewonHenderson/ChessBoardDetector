@@ -5,6 +5,15 @@ from sklearn.cluster import DBSCAN
 from sklearn.cluster import KMeans
 from scipy.spatial import KDTree
 
+"""
+This was the old file to cluster similar theta lines (didn't account for wrap arounds like
+0 theta == pi theta as they orientationally are the same, but mathematically different)
+
+This file also includes the static grid check based off:
+The intersection of the two groups
+The relative distance between rho
+How many lines total and per cluster
+"""
 
 def snap_to_cardinal_diagonal(angle, cardinal_threshold=15):
     """

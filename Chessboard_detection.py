@@ -4,15 +4,27 @@ import cv2
 import os
 import numpy as np
 from collections import Counter
-from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import cv_filter_groups as cvfg
-from ChessBoardDetector import HarrisCornerDetection as hcd
-from ChessBoardDetector import HoughTransform as ht
-from ChessBoardDetector import Grid_Completion as gc
-from ChessBoardDetector import Vanishing_point as vp
-from ChessBoardDetector import Line_Completion as lc
+from ChessBoardDetector.Clustering import filter_grids as fg
+from ChessBoardDetector.Clustering import Vanishing_point as vp
+from ChessBoardDetector.Remove_outliers import cv_filter_groups as cvfg
+from ChessBoardDetector.Line_Point_detection import HarrisCornerDetection as hcd
+from ChessBoardDetector.Line_Point_detection import HoughTransform as ht
+from ChessBoardDetector.Homography import Grid_Completion as gc
+from ChessBoardDetector.Homography import Line_Completion as lc
 
 """
+Author: Ivan Huang
+Description: This file runs all the pipelines of the process for board detection
+1) Canny Edge
+2) Houghline + Harris corner
+3) Clustering via theta / Vanishing point
+4) Grading clusters that creates grid like structure
+5) Expansion and homography on grid intersection
+"""
+
+
+"""
+The constant value used as parameter for opencv functions
 constant = the value is used as is
 multiplier = a multipled value to an already constant epsilon
 (larger == more lenient)

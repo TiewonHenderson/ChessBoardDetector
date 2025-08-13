@@ -3,9 +3,17 @@ import cv2
 import math
 import numpy as np
 from collections import Counter
-from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import cv_filter_groups as cvfg
+from ChessBoardDetector.Clustering import filter_grids as fg
+from ChessBoardDetector.Remove_outliers import cv_filter_groups as cvfg
 from sklearn.cluster import DBSCAN
+
+"""
+Vanishing point is the idea that the lines converge to a point due to 3D perspectives.
+This is the attempt to conquer chessboard detection that are too skewed by 3D factors.
+
+Currently, vanishing point are detected by the lines intersection, or
+which direction they are near parallel towards.
+"""
 
 
 def most_common_gap(gaps_list):

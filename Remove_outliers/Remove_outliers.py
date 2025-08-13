@@ -2,14 +2,34 @@ import sys
 import cv2
 import numpy as np
 from scipy.optimize import curve_fit
-from ChessBoardDetector import HoughTransform as ht
-from ChessBoardDetector import cv_filter_groups as cvfg
+from ChessBoardDetector.Line_Point_detection import HoughTransform as ht
+from ChessBoardDetector.Remove_outliers import cv_filter_groups as cvfg
 
+"""
+Author: Ivan Huang
+Description: This file contains functions that removes outlier lines (Rho, Theta) based on
+thier vanishing point directions and how the theta relationship should be relative to each other.
+
+For example given a cluster of lines vanishing point going towards the left of the camera.
+Theta range should be around pi/2 - pi, theta should be decreasing if you sort lines by left and right
+relative to the image.
+
+The lines are sorted within cv_filter_groups, as the method is to run a perpendicular line
+with the average theta of the entire group, since rho can be inconsistent.
+
+The relationship of theta is attempted to be fit onto a linear function.
+Arctan function was attempted, but it requires too many iterations and can fail majority of the situation.
+
+Improvements / TO-DOs:
+This would only work with realistic perspectives,
+but any upside down/sideway perspectives could throw the algorithm off.
+"""
 
 def get_min_max_med_theta(indices, lines):
     """
     Helper function to get median to best represent overlapped lines
     Max theta in order see if the combined lines even fit the expected behavior
+    :param indices: indicies corresponds to the index of input lines
     """
     indices_len = len(indices)
     if indices_len == 0:
@@ -19,18 +39,18 @@ def get_min_max_med_theta(indices, lines):
 
 
 def dp_find_longest_chain(interval, lines, threshold=0.05):
-    n = len(interval)
-    thetas = [get_min_max_med_theta(indices, lines) for indices in interval]
     """
     Quick GPT implemention using DP of find_longest_chain
-    
+
     dp represents the len that index can create
     prev represents the last last index that represent the previous element as a chain
-    
+
     so max(dp) index -> prev index, loop back through corresponding prev index's elements
     compare_type:
     False = med compare med, True = max > min
     """
+    n = len(interval)
+    thetas = [get_min_max_med_theta(indices, lines) for indices in interval]
     prev = [-1] * n
     dp = [1] * n
     compare_type = [False] * n

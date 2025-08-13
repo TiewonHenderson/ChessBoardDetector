@@ -1,13 +1,25 @@
 import sys
 import cv2
 import numpy as np
-from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import HarrisCornerDetection as hcd
-from ChessBoardDetector import Chessboard_detection as cd
-from ChessBoardDetector import Remove_outliers as ro
 from math import sin,cos
 from collections import Counter
 from sklearn.cluster import DBSCAN
+from ChessBoardDetector.Clustering import filter_grids as fg
+from ChessBoardDetector.Line_Point_detection import HarrisCornerDetection as hcd
+from ChessBoardDetector import Chessboard_detection as cd
+from ChessBoardDetector.Remove_outliers import Remove_outliers as ro
+
+"""
+Author: Ivan Huang
+Description:
+The main file to attempt to clean all the lines that share similar theta or vanishing points
+
+Uses a perpendicular line in respect to either the average theta or 
+vanishing point direction from the center of the image. This perpendicular line
+then runs through all the lines and the intersection points are sorted by x then y.
+
+This allows a better way to sort the lines instead of the combination of rho, theta.
+"""
 
 
 def bucket_sort(elements, threshold=0.4):

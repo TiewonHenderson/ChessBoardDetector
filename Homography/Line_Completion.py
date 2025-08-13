@@ -5,11 +5,22 @@ from math import sin,cos,ceil,sqrt
 from scipy.spatial import ConvexHull
 from scipy.spatial import KDTree
 from sklearn.linear_model import RANSACRegressor
-from ChessBoardDetector import HarrisCornerDetection as hcd
+from ChessBoardDetector.Line_Point_detection import HarrisCornerDetection as hcd
+from ChessBoardDetector.Line_Point_detection import HoughTransform as ht
 from ChessBoardDetector import Chessboard_detection as cd
-from ChessBoardDetector import HoughTransform as ht
-from ChessBoardDetector import filter_grids as fg
-from ChessBoardDetector import cv_filter_groups as cvfg
+from ChessBoardDetector.Clustering import filter_grids as fg
+from ChessBoardDetector.Remove_outliers import cv_filter_groups as cvfg
+
+"""
+This wasn't included in the final program, but it was an idea to interpolate lines
+inside expansion out of the grid.
+
+Line interpolation is a lot more unpredictable since theta and rho add more dimension.
+There also isn't a reference to go off of (since its likely been filtered)
+
+But it's an interesting idea, if worked, line interpolation can easily interpolate 9 corner points
+as a single interpolated unit.
+"""
 
 
 def find_abnormal_jumps_dynamic(points, window_size=3, base_factor=1.5):

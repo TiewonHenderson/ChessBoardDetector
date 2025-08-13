@@ -3,8 +3,22 @@ import cv2
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import DBSCAN
-from ChessBoardDetector import cv_filter_groups as cvfg
+from ChessBoardDetector.Remove_outliers import cv_filter_groups as cvfg
 
+
+"""
+Author: Ivan Huang
+Description: This file includes two methods of corner detection:
+1) Harris corner detection (More consistent, but likely generate noise)
+2) Shi_tomasi (Less consistent, allows more sparse corner points)
+
+Harris is more consistent since I have implemented DBSCAN in order to cluster close
+enough points. This could offset the points but that distance is negligible
+
+This file also includes a function to filter lines through the corner points found.
+A combination of needing x amount of corner points intersected to remain within the line list
+In addition to needing a sub-list of corners that have a consistent distance to each other consecutively.
+"""
 
 def show_corners(image, points):
     # AI generated to only see points
